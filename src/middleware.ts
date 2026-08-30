@@ -130,6 +130,11 @@ function unauthorizedHtml(wrongToken = false): string {
 }
 
 export function middleware(req: NextRequest) {
+  // Throwaway: Host-list prototype is the Relay Login path, not the LAN Token gate.
+  if (req.nextUrl.pathname.startsWith("/prototype/")) {
+    return NextResponse.next();
+  }
+
   const token = process.env.AUTH_TOKEN?.toLowerCase();
   if (!token) {
     return NextResponse.next();

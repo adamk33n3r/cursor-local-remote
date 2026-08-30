@@ -33,6 +33,7 @@
   ],
   "scripts": {
     "dev": "node bin/dev.mjs",
+    "prototype:host-list-flow": "node bin/dev.mjs",
     "build": "next build",
     "start": "node bin/dev.mjs --start",
     "lint": "eslint .",
