@@ -125,18 +125,19 @@ export function useHostListFlow() {
     setState((s) => {
       const host = s.hosts.find((h) => h.id === id);
       if (!host) return s;
+      if (host.online) {
+        return {
+          ...s,
+          lastAction: `Forget refused while ${host.displayName} is online`,
+          notice: "Forget is only on offline rows.",
+        };
+      }
       const remaining = s.hosts.filter((h) => h.id !== id);
-      const wasInside = s.selectedHostId === id;
       return {
         ...s,
         hosts: remaining,
-        screen: wasInside || s.screen === "host" && s.selectedHostId === id ? "list" : s.screen,
-        selectedHostId: wasInside ? null : s.selectedHostId,
-        stickyPath: wasInside ? "/" : s.stickyPath,
-        lastAction: `Forget ${host.displayName}${host.online ? " (Tunnel dropped)" : ""}`,
-        notice: wasInside
-          ? "Forgot the Host you were in. Landed on the Host list."
-          : `Forgot ${host.displayName}. Reconnect with the same id is this row again.`,
+        lastAction: `Forget ${host.displayName}`,
+        notice: `Forgot ${host.displayName}. Reconnect with the same id is this row again.`,
       };
     });
   }, []);

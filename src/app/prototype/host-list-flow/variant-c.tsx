@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { HostListFlow, HostRow } from "./flow-state";
+import type { HostListFlow } from "./flow-state";
 import { HostStandin } from "./host-standin";
 
 type VariantCProps = {
@@ -12,7 +12,6 @@ export function VariantC({ flow }: VariantCProps) {
   const { state, selectedHost, login, logout, pick, backToList, forget } = flow;
   const [user, setUser] = useState("adam");
   const [pass, setPass] = useState("secret");
-  const [forgetTarget, setForgetTarget] = useState<HostRow | null>(null);
 
   if (state.screen === "login") {
     return (
@@ -87,49 +86,14 @@ export function VariantC({ flow }: VariantCProps) {
                 <button type="button" className="flex-1 text-left text-text-muted" onClick={() => pick(h.id)}>
                   {h.displayName}
                 </button>
-                <button type="button" className="text-xs text-error" onClick={() => setForgetTarget(h)}>
+                <button type="button" className="text-xs text-error" onClick={() => forget(h.id)}>
                   Forget
                 </button>
               </div>
-            ))}
-            {online.map((h) => (
-              <button
-                key={`forget-online-${h.id}`}
-                type="button"
-                className="text-left text-xs text-text-muted underline"
-                onClick={() => setForgetTarget(h)}
-              >
-                Forget {h.displayName}
-              </button>
             ))}
           </>
         )}
         {state.notice ? <p className="mt-4 text-sm text-warning">{state.notice}</p> : null}
-
-        {forgetTarget ? (
-          <div className="fixed inset-0 z-40 flex items-end bg-black/60" onClick={() => setForgetTarget(null)}>
-            <div
-              className="w-full rounded-t-3xl bg-bg-surface p-5"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <p className="text-lg text-text">Forget {forgetTarget.displayName}?</p>
-              <p className="mt-2 text-sm text-text-secondary">
-                Removes the row. If online, the Relay drops its Tunnel. Reconnect with the same id is this row again.
-              </p>
-              <div className="mt-4 flex gap-2">
-                <button type="button" className="flex-1 rounded-2xl bg-error py-3 text-white" onClick={() => {
-                  forget(forgetTarget.id);
-                  setForgetTarget(null);
-                }}>
-                  Forget
-                </button>
-                <button type="button" className="flex-1 rounded-2xl bg-bg py-3 text-text" onClick={() => setForgetTarget(null)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
     );
   }
