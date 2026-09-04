@@ -1,10 +1,10 @@
 import initSqlJs from "sql.js";
 import { join } from "path";
-import { homedir } from "os";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "fs";
 import type { StoredSession } from "@/lib/types";
+import { getHostDataDir } from "@/lib/list-session-workspaces.mjs";
 
-const DATA_DIR = join(homedir(), ".cursor-local-remote");
+const DATA_DIR = getHostDataDir();
 const DB_PATH = join(DATA_DIR, "sessions.db");
 
 type Database = initSqlJs.Database;

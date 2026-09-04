@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MODEL_ID_PATTERN } from "@/lib/model-id.mjs";
 
 export const SESSION_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 
@@ -10,7 +11,7 @@ export const chatRequestSchema = z.object({
   model: z
     .string()
     .max(128)
-    .regex(/^[a-zA-Z0-9._/-]+$/, "invalid model")
+    .regex(MODEL_ID_PATTERN, "invalid model")
     .optional(),
   mode: z.enum(["agent", "ask", "plan"]).optional(),
   workspace: z.string().max(512).optional(),

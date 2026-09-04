@@ -3,9 +3,9 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: "Cursor Local Remote",
-    short_name: "CLR",
-    description: "Control Cursor IDE from any device on your local network",
+    name: "Cursor Remote",
+    short_name: "Cursor Remote",
+    description: "Control Cursor from any Client on your network",
     start_url: "/",
     display: "standalone",
     background_color: "#0a0a0b",

@@ -39,7 +39,7 @@ function formatTodoList(todos: TodoItem[]): string {
 function formatForDiscord(payload: WebhookPayload): Record<string, unknown> {
   const color = payload.event === "test" ? 0x5865f2 : 0x57f287;
   const parts = [payload.message];
-  if (payload.url) parts.push(`\n[Open in CLR](${payload.url})`);
+  if (payload.url) parts.push(`\n[Open in Cursor Remote](${payload.url})`);
   return {
     embeds: [{
       title: payload.title,
@@ -51,7 +51,7 @@ function formatForDiscord(payload: WebhookPayload): Record<string, unknown> {
 }
 
 function formatForSlack(payload: WebhookPayload): Record<string, unknown> {
-  const link = payload.url ? `\n<${payload.url}|Open in CLR>` : "";
+  const link = payload.url ? `\n<${payload.url}|Open in Cursor Remote>` : "";
   return { text: `*${payload.title}*\n${payload.message}${link}` };
 }
 

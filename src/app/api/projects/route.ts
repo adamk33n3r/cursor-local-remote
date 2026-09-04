@@ -1,37 +1,26 @@
-import { sep } from "path";
-import { listProjects } from "@/lib/transcript-reader";
+import { listCursorCacheWorkspaces } from "@/lib/transcript-reader";
 import { listWorkspaces } from "@/lib/session-store";
 import { getWorkspace } from "@/lib/workspace";
 import { serverError } from "@/lib/errors";
-import type { ProjectInfo } from "@/lib/types";
+import { mergeKnownWorkspaces } from "@/lib/merge-known-workspaces.mjs";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const [transcriptProjects, dbWorkspaces] = await Promise.all([
-      listProjects(),
+    const [fromCursorCache, fromSessionStore] = await Promise.all([
+      listCursorCacheWorkspaces(),
       listWorkspaces(),
     ]);
-    const currentWorkspace = getWorkspace();
-
-    const byPath = new Map<string, ProjectInfo>();
-    for (const p of transcriptProjects) {
-      byPath.set(p.path, p);
-    }
-    for (const ws of dbWorkspaces) {
-      if (byPath.has(ws)) continue;
-      const name = ws.split(sep).pop() || ws;
-      byPath.set(ws, { name, path: ws, key: ws });
-    }
-    if (!byPath.has(currentWorkspace)) {
-      const name = currentWorkspace.split(sep).pop() || currentWorkspace;
-      byPath.set(currentWorkspace, { name, path: currentWorkspace, key: currentWorkspace });
-    }
-
-    const projects = Array.from(byPath.values()).sort((a, b) => a.name.localeCompare(b.name));
-    return Response.json({ projects, currentWorkspace });
+    const startDirectory = getWorkspace();
+    return Response.json(
+      mergeKnownWorkspaces({
+        fromCursorCache,
+        fromSessionStore,
+        startDirectory,
+      }),
+    );
   } catch {
-    return serverError("Failed to list projects");
+    return serverError("Failed to list workspaces");
   }
 }

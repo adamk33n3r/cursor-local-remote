@@ -1,6 +1,7 @@
 import { spawn, execFileSync, type ChildProcess } from "child_process";
 import type { AgentMode } from "@/lib/types";
 import { getConfig } from "@/lib/session-store";
+import { buildAgentArgv } from "@/lib/agent-argv.mjs";
 
 let agentChecked = false;
 
@@ -33,23 +34,7 @@ async function shouldTrust(): Promise<boolean> {
 
 export async function spawnAgent(options: AgentOptions): Promise<ChildProcess> {
   ensureAgentOnPath();
-  const args = ["-p", options.prompt, "--output-format", "stream-json", "--stream-partial-output"];
-
-  if (await shouldTrust()) {
-    args.push("--trust");
-  }
-  if (options.sessionId) {
-    args.push("--resume", options.sessionId);
-  }
-  if (options.workspace) {
-    args.push("--workspace", options.workspace);
-  }
-  if (options.model) {
-    args.push("--model", options.model);
-  }
-  if (options.mode && options.mode !== "agent") {
-    args.push("--mode", options.mode);
-  }
+  const args = buildAgentArgv(options, { trust: await shouldTrust() });
 
   return spawn("agent", args, {
     stdio: ["pipe", "pipe", "pipe"],

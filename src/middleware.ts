@@ -10,7 +10,7 @@ function unauthorizedHtml(wrongToken = false): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Cursor Local Remote</title>
+  <title>Cursor Remote</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -114,7 +114,7 @@ function unauthorizedHtml(wrongToken = false): string {
       <button type="submit">Connect</button>
     </form>
     ${wrongToken ? '<p class="error-msg">Wrong token. Check your terminal for the correct one.</p>' : ""}
-    <p class="hint">Run <code>clr</code> in your terminal to see the QR code and token.</p>
+    <p class="hint">Run <code>cursor-remote</code> in your terminal to see the QR code and token.</p>
   </div>
   <script>
     function handleSubmit(e) {

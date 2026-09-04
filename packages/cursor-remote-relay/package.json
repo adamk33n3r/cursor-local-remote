@@ -1,0 +1,32 @@
+{
+  "name": "@adamk33n3r/cursor-remote-relay",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "LAN Relay stub for Cursor Remote Hosts. Install separately from the Host.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adamk33n3r/cursor-local-remote.git",
+    "directory": "packages/cursor-remote-relay"
+  },
+  "keywords": [
+    "cursor",
+    "cursor-remote",
+    "relay"
+  ],
+  "bin": {
+    "cursor-remote-relay": "./bin/cursor-remote-relay.mjs"
+  },
+  "files": [
+    "bin/"
+  ],
+  "scripts": {
+    "test": "node --test ../../test/relay-package.test.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
