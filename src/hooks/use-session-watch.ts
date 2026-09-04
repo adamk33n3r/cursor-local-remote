@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { ChatMessage, ToolCallInfo } from "@/lib/types";
 import { apiFetch } from "@/lib/api-fetch";
+import { liveWebSocketUrl } from "@/lib/live-ws-url";
 import { vlog } from "@/lib/verbose";
 
 export interface SessionWatchState {
@@ -11,6 +12,34 @@ export interface SessionWatchState {
   isWatching: boolean;
   isActive: boolean;
   lastModified: number;
+}
+
+interface WatchPayload {
+  messages?: ChatMessage[];
+  toolCalls?: ToolCallInfo[];
+  modifiedAt?: number;
+  isActive?: boolean;
+}
+
+type WatchServerMessage =
+  | { event: "connected"; data: WatchPayload }
+  | { event: "update"; data: WatchPayload };
+
+function parseWatchServerMessage(raw: string): WatchServerMessage | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    console.error("[watch] Failed to parse live message");
+    vlog("watch-client", "parse error", String(err));
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  if (!("event" in parsed) || !("data" in parsed)) return null;
+  const rec = parsed as { event: unknown; data: unknown };
+  if (rec.event !== "connected" && rec.event !== "update") return null;
+  if (!rec.data || typeof rec.data !== "object") return null;
+  return { event: rec.event, data: rec.data as WatchPayload };
 }
 
 interface UseSessionWatchOptions {
@@ -24,7 +53,7 @@ export function useSessionWatch(options: UseSessionWatchOptions = {}) {
   const [isWatching, setIsWatching] = useState(false);
   const [isActive, setIsActive] = useState(false);
 
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
   const lastModifiedRef = useRef<number>(0);
   const onStreamEndRef = useRef(options.onStreamEnd);
   const onStreamStartRef = useRef(options.onStreamStart);
@@ -33,10 +62,10 @@ export function useSessionWatch(options: UseSessionWatchOptions = {}) {
   useEffect(() => { onStreamStartRef.current = options.onStreamStart; }, [options.onStreamStart]);
 
   const stopWatching = useCallback(() => {
-    if (eventSourceRef.current) {
-      vlog("watch-client", "stopWatching: closing EventSource");
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
+    if (socketRef.current) {
+      vlog("watch-client", "stopWatching: closing WebSocket");
+      socketRef.current.close();
+      socketRef.current = null;
     }
     setIsWatching(false);
   }, []);
@@ -59,11 +88,11 @@ export function useSessionWatch(options: UseSessionWatchOptions = {}) {
     });
   }, []);
 
-  const applyUpdate = useCallback((data: Record<string, unknown>) => {
-    if (data.modifiedAt && (data.modifiedAt as number) > lastModifiedRef.current) {
-      lastModifiedRef.current = data.modifiedAt as number;
-      if ((data.messages as ChatMessage[])?.length > 0) mergeMessages(data.messages as ChatMessage[]);
-      if ((data.toolCalls as ToolCallInfo[])?.length > 0) setToolCalls(data.toolCalls as ToolCallInfo[]);
+  const applyUpdate = useCallback((data: WatchPayload) => {
+    if (data.modifiedAt && data.modifiedAt > lastModifiedRef.current) {
+      lastModifiedRef.current = data.modifiedAt;
+      if (data.messages && data.messages.length > 0) mergeMessages(data.messages);
+      if (data.toolCalls && data.toolCalls.length > 0) setToolCalls(data.toolCalls);
     }
   }, [mergeMessages]);
 
@@ -71,67 +100,74 @@ export function useSessionWatch(options: UseSessionWatchOptions = {}) {
     (id: string, workspace?: string) => {
       stopWatching();
 
-      let url = `/api/sessions/watch?id=${encodeURIComponent(id)}`;
-      if (workspace) url += `&workspace=${encodeURIComponent(workspace)}`;
-      vlog("watch-client", "startWatching: opening EventSource", { id, url });
-      const es = new EventSource(url);
-      eventSourceRef.current = es;
+      let path = `/api/sessions/watch?id=${encodeURIComponent(id)}`;
+      if (workspace) path += `&workspace=${encodeURIComponent(workspace)}`;
+      const url = liveWebSocketUrl(path);
+      vlog("watch-client", "startWatching: opening WebSocket", { id, url });
+      const ws = new WebSocket(url);
+      socketRef.current = ws;
 
-      es.addEventListener("connected", (e) => {
-        setIsWatching(true);
-        try {
-          const data = JSON.parse(e.data);
-          vlog("watch-client", "connected event", {
-            id, isActive: data.isActive,
-            messages: data.messages?.length ?? 0,
-            toolCalls: data.toolCalls?.length ?? 0,
-            modifiedAt: data.modifiedAt,
-          });
-          if (data.isActive === true) {
-            setIsActive(true);
-            onStreamStartRef.current?.();
-          } else {
-            setIsActive(false);
-            onStreamEndRef.current?.();
+      ws.addEventListener("message", (e) => {
+        const msg = parseWatchServerMessage(String(e.data));
+        if (!msg) return;
+
+        switch (msg.event) {
+          case "connected": {
+            setIsWatching(true);
+            const data = msg.data;
+            vlog("watch-client", "connected event", {
+              id, isActive: data.isActive,
+              messages: data.messages?.length ?? 0,
+              toolCalls: data.toolCalls?.length ?? 0,
+              modifiedAt: data.modifiedAt,
+            });
+            if (data.isActive === true) {
+              setIsActive(true);
+              onStreamStartRef.current?.();
+            } else {
+              setIsActive(false);
+              onStreamEndRef.current?.();
+            }
+            if (data.modifiedAt) lastModifiedRef.current = data.modifiedAt;
+            if (data.messages && data.messages.length > 0) mergeMessages(data.messages);
+            if (data.toolCalls && data.toolCalls.length > 0) setToolCalls(data.toolCalls);
+            return;
           }
-          if (data.modifiedAt) lastModifiedRef.current = data.modifiedAt;
-          if (data.messages?.length > 0) mergeMessages(data.messages);
-          if (data.toolCalls?.length > 0) setToolCalls(data.toolCalls);
-        } catch (err) {
-          console.error("[watch] Failed to parse connected event");
-          vlog("watch-client", "connected parse error", String(err));
+          case "update": {
+            const data = msg.data;
+            vlog("watch-client", "update event", {
+              id, isActive: data.isActive,
+              messages: data.messages?.length ?? 0,
+              toolCalls: data.toolCalls?.length ?? 0,
+              modifiedAt: data.modifiedAt,
+            });
+            applyUpdate(data);
+
+            if (data.isActive === false) {
+              setIsActive(false);
+              onStreamEndRef.current?.();
+            } else if (data.isActive === true) {
+              setIsActive(true);
+            }
+            return;
+          }
+          default: {
+            const _never: never = msg;
+            return _never;
+          }
         }
       });
 
-      es.addEventListener("update", (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          vlog("watch-client", "update event", {
-            id, isActive: data.isActive,
-            messages: data.messages?.length ?? 0,
-            toolCalls: data.toolCalls?.length ?? 0,
-            modifiedAt: data.modifiedAt,
-          });
-          applyUpdate(data);
-
-          if (data.isActive === false) {
-            setIsActive(false);
-            onStreamEndRef.current?.();
-          } else if (data.isActive === true) {
-            setIsActive(true);
-          }
-        } catch (err) {
-          console.error("[watch] Failed to parse update event");
-          vlog("watch-client", "update parse error", String(err));
-        }
+      ws.addEventListener("error", () => {
+        vlog("watch-client", "WebSocket error", { id, readyState: ws.readyState });
       });
 
-      es.addEventListener("error", (e) => {
-        vlog("watch-client", "EventSource error", { id, readyState: es.readyState, event: String(e) });
-        if (es.readyState === EventSource.CLOSED) {
-          setIsActive(false);
-          onStreamEndRef.current?.();
-        }
+      ws.addEventListener("close", () => {
+        vlog("watch-client", "WebSocket closed", { id, readyState: ws.readyState });
+        if (socketRef.current !== ws) return;
+        socketRef.current = null;
+        setIsActive(false);
+        onStreamEndRef.current?.();
       });
     },
     [stopWatching, applyUpdate, mergeMessages],

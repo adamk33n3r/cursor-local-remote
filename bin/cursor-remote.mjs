@@ -339,24 +339,21 @@ function openBrowser() {
   }
 }
 
-const nextBin = resolve(projectRoot, "node_modules", ".bin", "next");
 const isBuilt = existsSync(resolve(projectRoot, ".next", "BUILD_ID"));
+const hostHttpArgs = isBuilt ? ["--start"] : [];
 
-const nextArgs = isBuilt
-  ? ["start", "--hostname", hostname, "--port", port]
-  : ["dev", "--hostname", hostname, "--port", port];
-
-const child = spawn(nextBin, nextArgs, {
+const child = spawn(process.execPath, [resolve(projectRoot, "bin/host-http.mjs"), ...hostHttpArgs], {
   cwd: projectRoot,
-  shell: true,
   stdio: ["inherit", "pipe", "pipe"],
   env: {
     ...process.env,
     CURSOR_WORKSPACE: workspace,
     CURSOR_TRUST: trust ? "1" : "",
     PORT: port,
+    HOST: hostname,
     AUTH_TOKEN: authToken,
     CLR_VERBOSE: verbose ? "1" : "",
+    NODE_ENV: isBuilt ? "production" : process.env.NODE_ENV || "development",
   },
 });
 

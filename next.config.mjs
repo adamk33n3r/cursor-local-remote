@@ -6,7 +6,7 @@ const csp = isDev
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ["sql.js"],
+  serverExternalPackages: ["sql.js", "ws"],
   async headers() {
     return [
       {

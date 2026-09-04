@@ -6,6 +6,7 @@ import type { FitAddon } from "@xterm/addon-fit";
 import type { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { apiFetch } from "@/lib/api-fetch";
+import { liveWebSocketUrl } from "@/lib/live-ws-url";
 import { useHaptics } from "@/hooks/use-haptics";
 import { CloseIcon, PlusIcon, Spinner, StopIcon, TrashIcon } from "./icons";
 
@@ -55,7 +56,7 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [spawning, setSpawning] = useState(false);
-  const eventSourcesRef = useRef<Map<string, EventSource>>(new Map());
+  const socketsRef = useRef<Map<string, WebSocket>>(new Map());
   const xtermsRef = useRef<Map<string, XtermEntry>>(new Map());
   const containerRefsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const haptics = useHaptics();
@@ -126,33 +127,55 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
   }, []);
 
   const connectStream = useCallback((id: string) => {
-    if (eventSourcesRef.current.has(id)) return;
+    if (socketsRef.current.has(id)) return;
     const entry = getOrCreateXterm(id);
     if (!entry) return;
 
-    const es = new EventSource(`/api/terminal/stream?id=${id}`);
-    eventSourcesRef.current.set(id, es);
+    const ws = new WebSocket(liveWebSocketUrl(`/api/terminal/stream?id=${encodeURIComponent(id)}`));
+    socketsRef.current.set(id, ws);
 
-    es.addEventListener("connected", (e) => {
-      const data = JSON.parse(e.data);
-      if (data.output) entry.term.write(data.output);
-      setTabs((prev) =>
-        prev.map((t) => t.id === id ? { ...t, running: data.running, exitCode: data.exitCode } : t),
-      );
+    ws.addEventListener("message", (e) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(String(e.data));
+      } catch (err) {
+        console.error("[terminal] Failed to parse live message", err);
+        return;
+      }
+      if (!parsed || typeof parsed !== "object") return;
+      if (!("event" in parsed) || !("data" in parsed)) return;
+      const rec = parsed as { event: unknown; data: unknown };
+      if (rec.event !== "connected" && rec.event !== "output") return;
+      if (!rec.data || typeof rec.data !== "object") return;
+      const data = rec.data as { output?: string; data?: string; running?: boolean; exitCode?: number | null };
+
+      switch (rec.event) {
+        case "connected":
+          if (data.output) entry.term.write(data.output);
+          setTabs((prev) =>
+            prev.map((t) => t.id === id ? { ...t, running: data.running ?? t.running, exitCode: data.exitCode ?? t.exitCode } : t),
+          );
+          return;
+        case "output":
+          if (data.data) entry.term.write(data.data);
+          setTabs((prev) =>
+            prev.map((t) => t.id === id ? { ...t, running: data.running ?? t.running, exitCode: data.exitCode ?? t.exitCode } : t),
+          );
+          return;
+        default: {
+          const _never: never = rec.event;
+          return _never;
+        }
+      }
     });
 
-    es.addEventListener("output", (e) => {
-      const data = JSON.parse(e.data);
-      if (data.data) entry.term.write(data.data);
-      setTabs((prev) =>
-        prev.map((t) => t.id === id ? { ...t, running: data.running, exitCode: data.exitCode } : t),
-      );
+    ws.addEventListener("error", () => {
+      console.error("[terminal] WebSocket error", id);
     });
 
-    es.onerror = () => {
-      es.close();
-      eventSourcesRef.current.delete(id);
-    };
+    ws.addEventListener("close", () => {
+      socketsRef.current.delete(id);
+    });
   }, [getOrCreateXterm]);
 
   const prevWorkspaceRef = useRef(workspace);
@@ -162,8 +185,8 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
       prevWorkspaceRef.current = workspace;
       loadedRef.current = false;
 
-      for (const es of eventSourcesRef.current.values()) es.close();
-      eventSourcesRef.current.clear();
+      for (const ws of socketsRef.current.values()) ws.close();
+      socketsRef.current.clear();
       for (const entry of xtermsRef.current.values()) {
         entry.disposed = true;
         entry.term.dispose();
@@ -202,8 +225,8 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
 
   useEffect(() => {
     return () => {
-      for (const es of eventSourcesRef.current.values()) es.close();
-      eventSourcesRef.current.clear();
+      for (const ws of socketsRef.current.values()) ws.close();
+      socketsRef.current.clear();
       for (const entry of xtermsRef.current.values()) {
         entry.disposed = true;
         entry.term.dispose();
@@ -244,8 +267,8 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
   const isRunning = current?.running ?? false;
 
   const cleanupTerminal = useCallback((id: string) => {
-    const es = eventSourcesRef.current.get(id);
-    if (es) { es.close(); eventSourcesRef.current.delete(id); }
+    const socket = socketsRef.current.get(id);
+    if (socket) { socket.close(); socketsRef.current.delete(id); }
     const entry = xtermsRef.current.get(id);
     if (entry) { entry.disposed = true; entry.term.dispose(); xtermsRef.current.delete(id); }
     containerRefsRef.current.delete(id);
@@ -279,30 +302,31 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
     }
   }, [workspace, connectStream, haptics]);
 
-  const handleSendStdin = useCallback(async (text: string) => {
+  const sendStdin = useCallback((id: string, data: string) => {
+    const ws = socketsRef.current.get(id);
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.error("[terminal] WebSocket is not open; cannot send input");
+      return;
+    }
+    ws.send(JSON.stringify({ type: "input", data }));
+  }, []);
+
+  const handleSendStdin = useCallback((text: string) => {
     if (!activeTab || !text) return;
-    await apiFetch("/api/terminal/input", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: activeTab, data: text + "\n" }),
-    }).catch(() => {});
+    sendStdin(activeTab, text + "\n");
     setInput("");
-  }, [activeTab]);
+  }, [activeTab, sendStdin]);
 
   const handleSubmit = useCallback(() => {
     if (!current || !isRunning) return;
     handleSendStdin(input);
   }, [input, current, isRunning, handleSendStdin]);
 
-  const handleCtrlC = useCallback(async () => {
+  const handleCtrlC = useCallback(() => {
     if (!activeTab) return;
-    await apiFetch("/api/terminal/input", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: activeTab, data: "\x03" }),
-    }).catch(() => {});
+    sendStdin(activeTab, "\x03");
     haptics.tap();
-  }, [activeTab, haptics]);
+  }, [activeTab, haptics, sendStdin]);
 
   const handleKill = useCallback(async (id: string) => {
     haptics.warn();

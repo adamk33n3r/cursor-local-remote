@@ -80,10 +80,11 @@ export function registerProcess(
         // don't let push errors break process cleanup
       }
     }
-    setTimeout(() => {
+    const ttl = setTimeout(() => {
       liveEvents.delete(entry.mapKey);
       liveListeners.delete(entry.mapKey);
     }, LIVE_EVENT_TTL_MS);
+    ttl.unref();
   };
   child.on("close", onExit);
   child.on("error", onExit);

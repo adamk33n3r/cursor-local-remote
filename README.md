@@ -121,10 +121,10 @@ clr --no-open --no-qr        # headless-friendly
 
 ```
 Phone / tablet / browser  ── LAN ──>  Next.js (0.0.0.0:3100)  ──>  cursor CLI (agent)
-                          <─ stream ─
+                          <─ WebSocket ─
 ```
 
-The CLI starts a pre-built Next.js server on your machine. When you send a prompt, the server spawns a headless `agent` process (`agent -p <prompt> --output-format stream-json`) and streams the NDJSON output back to the browser over HTTP. Session history comes from reading Cursor's own transcript files in `~/.cursor/projects/`, so you see all sessions, not just ones started from this tool.
+The CLI starts a pre-built Next.js server on your machine. When you send a prompt, the server spawns a headless `agent` process (`agent -p <prompt> --output-format stream-json`) and streams live Session and terminal output back to the Client over WebSocket. Session history comes from reading Cursor's own transcript files in `~/.cursor/projects/`, so you see all sessions, not just ones started from this tool.
 
 ### Authentication
 
@@ -148,7 +148,8 @@ All endpoints require a valid token (cookie or `Bearer` header).
 | `/api/sessions/active` | `GET` | List currently running agent session IDs |
 | `/api/sessions/active` | `DELETE` | Kill a running agent process. Body: `{ sessionId }` |
 | `/api/sessions/history` | `GET` | Full transcript for a session. `?id=<sessionId>&workspace=<path>` |
-| `/api/sessions/watch` | `GET` | SSE stream for live session updates. `?id=<sessionId>&workspace=<path>` |
+| `/api/sessions/watch` | WebSocket | Live Session updates. `?id=<sessionId>&workspace=<path>` |
+| `/api/terminal/stream` | WebSocket | In-Host terminal, both ways. `?id=<terminalId>` |
 | `/api/projects` | `GET` | List all discovered Cursor projects |
 | `/api/git` | `GET` | Git status, diffs, and branches. `?workspace=<path>&detail=status\|diff\|branches` |
 | `/api/git` | `POST` | Git actions. Body: `{ action, workspace?, message?, files?, branch? }` |

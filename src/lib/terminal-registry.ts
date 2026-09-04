@@ -36,15 +36,22 @@ function cleanEnv(): NodeJS.ProcessEnv {
   return base;
 }
 
+function shellCommand(): { cmd: string; args: string[] } {
+  if (process.platform === "win32") {
+    return { cmd: process.env.ComSpec || "cmd.exe", args: [] };
+  }
+  return { cmd: process.env.SHELL || "/bin/sh", args: ["-i"] };
+}
+
 export function spawnTerminal(cwd: string): TerminalProcess {
   const id = randomUUID().slice(0, 8);
-  const shell = process.env.SHELL || "/bin/sh";
+  const { cmd, args } = shellCommand();
 
-  const child = spawn(shell, ["-i"], {
+  const child = spawn(cmd, args, {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
     env: cleanEnv(),
-    detached: true,
+    detached: process.platform !== "win32",
   });
 
   const entry: TerminalProcess = {
