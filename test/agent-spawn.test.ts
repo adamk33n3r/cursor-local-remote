@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildAgentArgv } from "../src/lib/agent-argv.mjs";
-import { isValidModelId } from "../src/lib/model-id.mjs";
+import { buildAgentArgv } from "../src/lib/agent-argv";
+import { isValidModelId } from "../src/lib/model-id";
 
 test("spawn --model includes effort when the Client sent it and never uses --effort", () => {
   const argv = buildAgentArgv(

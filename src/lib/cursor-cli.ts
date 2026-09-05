@@ -2,7 +2,7 @@ import { spawn, execFileSync, type ChildProcess } from "child_process";
 import type { AgentMode } from "@/lib/types";
 import { resolveAgentBin, type ResolvedAgent } from "@/lib/agent-bin";
 import { getConfig } from "@/lib/session-store";
-import { buildAgentArgv } from "@/lib/agent-argv.mjs";
+import { buildAgentArgv } from "@/lib/agent-argv";
 
 let resolved: ResolvedAgent | null = null;
 

@@ -1,17 +1,15 @@
-/**
- * Build the Agent CLI argv. Effort is only ever part of --model.
- *
- * @param {{
- *   prompt: string,
- *   sessionId?: string,
- *   workspace?: string,
- *   model?: string,
- *   mode?: string,
- * }} options
- * @param {{ trust: boolean }} flags
- * @returns {string[]}
- */
-export function buildAgentArgv(options, flags) {
+import type { AgentMode } from "@/lib/types";
+
+/** Options for the Agent CLI argv. Effort is only ever part of --model. */
+export interface AgentArgvOptions {
+  prompt: string;
+  sessionId?: string;
+  workspace?: string;
+  model?: string;
+  mode?: AgentMode;
+}
+
+export function buildAgentArgv(options: AgentArgvOptions, flags: { trust: boolean }): string[] {
   const args = ["-p", options.prompt, "--output-format", "stream-json", "--stream-partial-output"];
 
   if (flags.trust) {
