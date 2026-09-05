@@ -19,13 +19,18 @@ if (isStart && !process.env.NODE_ENV) {
 }
 
 const app = next({ dev, hostname, port, dir: projectRoot });
+// Must be set before the first getRequestHandler() call. Next otherwise
+// attaches a catch-all `upgrade` listener on req.socket.server.
+app.didWebSocketSetup = true;
 await app.prepare();
+app.didWebSocketSetup = true;
 
 const handle = app.getRequestHandler();
-const nextUpgrade = app.getUpgradeHandler();
-// Next's request handler would otherwise attach a catch-all upgrade
-// listener on first HTTP request, racing our live-stream upgrades.
-app.didWebSocketSetup = true;
+// NextCustomServer.getUpgradeHandler() is next-server.handleUpgrade, which is a
+// no-op. The router-server handler that actually runs webpack HMR is the
+// `upgradeHandler` getter. A hanging HMR handshake blocks the browser from
+// starting any other WebSocket to this origin (terminal, session watch).
+const nextUpgrade = app.upgradeHandler;
 
 const attach = globalThis.__attachLiveWebSockets;
 const handleLiveHttp = globalThis.__handleLiveHttpRequest;
