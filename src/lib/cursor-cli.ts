@@ -2,6 +2,7 @@ import { spawn, execFileSync, type ChildProcess } from "child_process";
 import type { AgentMode } from "@/lib/types";
 import { resolveAgentBin, type ResolvedAgent } from "@/lib/agent-bin";
 import { getConfig } from "@/lib/session-store";
+import { buildAgentArgv } from "@/lib/agent-argv.mjs";
 
 let resolved: ResolvedAgent | null = null;
 
@@ -37,28 +38,8 @@ export async function spawnAgent(options: AgentOptions): Promise<ChildProcess> {
   const agent = agentLaunch();
   const args = [
     ...agent.prefixArgs,
-    "-p",
-    options.prompt,
-    "--output-format",
-    "stream-json",
-    "--stream-partial-output",
+    ...buildAgentArgv(options, { trust: await shouldTrust() }),
   ];
-
-  if (await shouldTrust()) {
-    args.push("--trust");
-  }
-  if (options.sessionId) {
-    args.push("--resume", options.sessionId);
-  }
-  if (options.workspace) {
-    args.push("--workspace", options.workspace);
-  }
-  if (options.model) {
-    args.push("--model", options.model);
-  }
-  if (options.mode && options.mode !== "agent") {
-    args.push("--mode", options.mode);
-  }
 
   return spawn(agent.command, args, {
     stdio: ["pipe", "pipe", "pipe"],

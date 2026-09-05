@@ -69,7 +69,7 @@ export interface ModelInfo {
   isCurrent: boolean;
 }
 
-export interface ProjectInfo {
+export interface WorkspaceInfo {
   name: string;
   path: string;
   key: string;

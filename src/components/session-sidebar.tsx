@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import type { StoredSession, ProjectInfo } from "@/lib/types";
+import type { StoredSession, WorkspaceInfo } from "@/lib/types";
 import { useHaptics } from "@/hooks/use-haptics";
 import { apiFetch } from "@/lib/api-fetch";
 import { timeAgo } from "@/lib/format";
@@ -159,7 +159,7 @@ export function SessionSidebar({
   const [showArchived, setShowArchived] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const [starred, setStarred] = useState<string[]>([]);
@@ -203,7 +203,7 @@ export function SessionSidebar({
     apiFetch("/api/projects")
       .then((r) => r.json())
       .then((data) => {
-        setProjects(data.projects || []);
+        setWorkspaces(data.workspaces || data.projects || []);
         if (!selectedProject && data.currentWorkspace) {
           setSelectedProject(data.currentWorkspace);
           localStorage.setItem(PROJECT_STORAGE_KEY, data.currentWorkspace);
@@ -300,11 +300,11 @@ export function SessionSidebar({
     setConfirmingDelete(null);
   };
 
-  const currentProjectName = selectedProject === "__all__"
-    ? "All projects"
-    : projects.find((p) => p.path === selectedProject)?.name
+  const currentWorkspaceName = selectedProject === "__all__"
+    ? "All workspaces"
+    : workspaces.find((w) => w.path === selectedProject)?.name
       || selectedProject?.split("/").pop()
-      || "Current project";
+      || "Current workspace";
 
   return (
     <>
@@ -358,7 +358,7 @@ export function SessionSidebar({
           {starred.length > 0 && (
             <div className="space-y-px">
               {starred.map((path) => {
-                const proj = projects.find((p) => p.path === path);
+                const proj = workspaces.find((w) => w.path === path);
                 const name = proj?.name || path.split("/").pop() || path;
                 const isActive = selectedProject === path;
                 const termCount = workspaceTerminals[path] || 0;
@@ -391,7 +391,7 @@ export function SessionSidebar({
               }}
               className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md text-[12px] text-text-muted hover:text-text-secondary hover:bg-bg-hover transition-colors"
             >
-              <span className="truncate">{currentProjectName}</span>
+              <span className="truncate">{currentWorkspaceName}</span>
               <ChevronDown />
             </button>
             {projectDropdownOpen && (
@@ -406,10 +406,10 @@ export function SessionSidebar({
                         : "text-text-secondary hover:bg-bg-hover hover:text-text"
                     }`}
                   >
-                    All projects
+                    All workspaces
                   </button>
                   <div className="h-px bg-border mx-2 my-1" />
-                  {projects.map((p) => {
+                  {workspaces.map((p) => {
                     const termCount = workspaceTerminals[p.path] || 0;
                     return (
                       <button
@@ -436,7 +436,7 @@ export function SessionSidebar({
                             starred.includes(p.path) ? "text-text-secondary" : "text-text-muted/30 hover:text-text-muted"
                           }`}
                           role="button"
-                          aria-label={starred.includes(p.path) ? "Unstar project" : "Star project"}
+                          aria-label={starred.includes(p.path) ? "Unstar workspace" : "Star workspace"}
                         >
                           <StarIcon size={12} filled={starred.includes(p.path)} />
                         </span>

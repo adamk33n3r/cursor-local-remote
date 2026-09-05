@@ -12,7 +12,7 @@ export async function POST() {
 
     await sendWebhook(url, {
       event: "test",
-      title: "Cursor Local Remote",
+      title: "Cursor Remote",
       message: "Test notification -- webhook is working!",
       timestamp: Date.now(),
     });

@@ -3,11 +3,11 @@ import { PwaInstall } from "@/components/pwa-install";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Cursor Local Remote",
-  description: "Control Cursor IDE from any device on your local network",
+  title: "Cursor Remote",
+  description: "Control Cursor from any Client on your network",
   appleWebApp: {
     capable: true,
-    title: "CLR",
+    title: "Cursor Remote",
     statusBarStyle: "black-translucent",
   },
 };

@@ -10,7 +10,7 @@ export interface PendingNotification {
 }
 
 const FLASH_INTERVAL_MS = 1000;
-const ORIGINAL_TITLE = "Cursor Local Remote";
+const ORIGINAL_TITLE = "Cursor Remote";
 
 function createBadgeFavicon(color: string): string {
   const canvas = document.createElement("canvas");
@@ -81,7 +81,7 @@ export function useNotification() {
     const badgeHref = createBadgeFavicon(badgeColor);
     if (badgeHref) setFavicon(badgeHref);
 
-    const flashTitle = type === "error" ? "Error - CLR" : "Done! - CLR";
+    const flashTitle = type === "error" ? "Error - Cursor Remote" : "Done! - Cursor Remote";
     let toggle = true;
     flashIntervalRef.current = setInterval(() => {
       document.title = toggle ? flashTitle : ORIGINAL_TITLE;

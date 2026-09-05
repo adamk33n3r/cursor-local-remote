@@ -10,6 +10,8 @@ import { randomInt } from "crypto";
 import { createServer } from "net";
 import http from "http";
 import qrcode from "qrcode-terminal";
+import { mergeKnownWorkspaces } from "../src/lib/merge-known-workspaces.mjs";
+import { listSessionStoreWorkspaces } from "../src/lib/list-session-workspaces.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
@@ -48,7 +50,7 @@ function generateToken() {
 
 const MAX_STATUS_SCAN = 20;
 
-function probeClr(port) {
+function probeHost(port) {
   return new Promise((resolve) => {
     const req = http.get(`http://127.0.0.1:${port}/api/info`, { timeout: 800 }, (res) => {
       let body = "";
@@ -81,9 +83,9 @@ function projectKeyToWorkspace(key) {
   return existsSync(path) ? path : null;
 }
 
-function discoverProjects() {
+function listCursorCacheWorkspaces() {
   const cursorDir = join(homedir(), ".cursor", "projects");
-  const projects = [];
+  const workspaces = [];
   try {
     const entries = readdirSync(cursorDir);
     for (const entry of entries) {
@@ -93,12 +95,12 @@ function discoverProjects() {
       const ws = projectKeyToWorkspace(entry);
       if (!ws) continue;
       const name = ws.split(sep).pop() || ws;
-      projects.push({ name, path: ws });
+      workspaces.push({ name, path: ws, key: entry });
     }
   } catch {
-    // cursor projects dir doesn't exist
+    // Cursor projects cache is missing
   }
-  return projects.sort((a, b) => a.name.localeCompare(b.name));
+  return workspaces.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 const args = process.argv.slice(2);
@@ -112,11 +114,11 @@ if (args.includes("--version") || args.includes("-V")) {
 if (args.includes("--status")) {
   const portStart = parseInt(process.env.PORT || "3100", 10);
   const portEnd = portStart + MAX_STATUS_SCAN;
-  console.log(`\n  Checking ports ${portStart}-${portEnd - 1} for running CLR instances...\n`);
+  console.log(`\n  Checking ports ${portStart}-${portEnd - 1} for running Host instances...\n`);
   let found = 0;
   const checks = [];
   for (let p = portStart; p < portEnd; p++) {
-    checks.push(probeClr(p));
+    checks.push(probeHost(p));
   }
   const results = await Promise.all(checks);
   for (const r of results) {
@@ -126,20 +128,26 @@ if (args.includes("--status")) {
     console.log(`     \x1b[2m${r.url}\x1b[0m`);
   }
   if (found === 0) {
-    console.log("  \x1b[2mNo running CLR instances found\x1b[0m");
+    console.log("  \x1b[2mNo running Host instances found\x1b[0m");
   }
   console.log("");
   process.exit(0);
 }
 
 if (args.includes("--list") || args.includes("-l")) {
-  const projects = discoverProjects();
-  if (projects.length === 0) {
-    console.log("\n  \x1b[2mNo Cursor projects found\x1b[0m\n");
+  const fromCursorCache = listCursorCacheWorkspaces();
+  const fromSessionStore = await listSessionStoreWorkspaces();
+  const { workspaces } = mergeKnownWorkspaces({
+    fromCursorCache,
+    fromSessionStore,
+    startDirectory: process.cwd(),
+  });
+  if (workspaces.length === 0) {
+    console.log("\n  \x1b[2mNo known workspaces\x1b[0m\n");
   } else {
-    console.log(`\n  Found ${projects.length} project${projects.length === 1 ? "" : "s"}:\n`);
-    for (const p of projects) {
-      console.log(`  \x1b[2m•\x1b[0m  ${p.name}  \x1b[2m→\x1b[0m  ${p.path}`);
+    console.log(`\n  Found ${workspaces.length} workspace${workspaces.length === 1 ? "" : "s"}:\n`);
+    for (const workspace of workspaces) {
+      console.log(`  \x1b[2m•\x1b[0m  ${workspace.name}  \x1b[2m→\x1b[0m  ${workspace.path}`);
     }
     console.log("");
   }
@@ -147,9 +155,9 @@ if (args.includes("--list") || args.includes("-l")) {
 }
 
 if (args.includes("--update") || args.includes("-u")) {
-  console.log("  Updating cursor-local-remote...\n");
+  console.log("  Updating @adamk33n3r/cursor-remote...\n");
   try {
-    execFileSync("npm", ["install", "-g", "cursor-local-remote@latest"], { stdio: "inherit" });
+    execFileSync("npm", ["install", "-g", "@adamk33n3r/cursor-remote@latest"], { stdio: "inherit" });
     console.log("\n  \x1b[32m✓ Updated successfully\x1b[0m");
   } catch {
     console.error("\n  \x1b[31m✗ Update failed\x1b[0m");
@@ -160,39 +168,39 @@ if (args.includes("--update") || args.includes("-u")) {
 
 if (args.includes("--help") || args.includes("-h")) {
   console.log(`
-  Cursor Local Remote - Control Cursor IDE from any device on your network
+  Cursor Remote - Control Cursor from any Client on your network
 
   Usage:
-    clr [workspace] [options]
+    cursor-remote [workspace] [options]
 
   Arguments:
-    workspace    Path to your project folder (defaults to current directory)
+    workspace    Path to the Start directory (defaults to current directory)
 
   Options:
     -p, --port     Port to run on (default: 3100)
-    -t, --token    Set auth token (otherwise random or AUTH_TOKEN env)
+    -t, --token    Set auth Token (otherwise random or AUTH_TOKEN env)
     --host         Bind to specific host/IP (default: 0.0.0.0)
     --no-open      Don't auto-open the browser
     --no-qr        Don't show QR code in terminal
-    --no-trust     Disable workspace trust (agent will ask before actions)
-    -v, --verbose  Show all server and agent output
+    --no-trust     Disable Workspace trust (Agent will ask before actions)
+    -v, --verbose  Show all Host and Agent output
 
   Commands:
-    -l, --list     List discovered Cursor projects
-    --status       Check if CLR is already running
+    -l, --list     List known Workspaces
+    --status       Check if a Host is already running
     -u, --update   Update to the latest version
     -V, --version  Show version number
     -h, --help     Show this help
 
   Examples:
-    clr                          # Start in current folder
-    clr ~/projects/my-app        # Start for a specific project
-    clr . --port 8080            # Use a different port
-    clr --token my-secret        # Use a fixed auth token
-    clr --host 127.0.0.1         # Bind to localhost only
-    clr --no-trust               # Require agent to ask before actions
-    clr --status                 # Check for running instances
-    clr --list                   # Show all known projects
+    cursor-remote                          # Start in current folder
+    cursor-remote ~/code/my-app            # Start for a specific Workspace
+    cursor-remote . --port 8080            # Use a different port
+    cursor-remote --token my-secret        # Use a fixed Token
+    cursor-remote --host 127.0.0.1         # Bind to localhost only
+    cursor-remote --no-trust               # Require Agent to ask before actions
+    cursor-remote --status                 # Check for running Host instances
+    cursor-remote --list                   # Show all known Workspaces
 `);
   process.exit(0);
 }
@@ -282,12 +290,7 @@ const authToken = customToken || process.env.AUTH_TOKEN || generateToken();
 const authUrl = `${localUrl}?token=${authToken}`;
 
 console.log("");
-console.log("\x1b[97m ██████╗██╗     ██████╗ ");
-console.log("██╔════╝██║     ██╔══██╗");
-console.log("██║     ██║     ██████╔╝");
-console.log("██║     ██║     ██╔══██╗");
-console.log("╚██████╗███████╗██║  ██║");
-console.log(" ╚═════╝╚══════╝╚═╝  ╚═╝\x1b[0m");
+console.log("\x1b[97m  Cursor Remote\x1b[0m");
 console.log(`  \x1b[2mWorkspace:\x1b[0m   ${workspace}`);
 console.log(`  \x1b[2mLocal:\x1b[0m       ${localUrl}`);
 if (networkUrl) {

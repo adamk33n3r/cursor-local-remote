@@ -1,12 +1,15 @@
 {
-  "name": "cursor-local-remote",
+  "name": "@adamk33n3r/cursor-remote",
   "version": "0.1.15",
   "type": "module",
-  "description": "Control Cursor IDE from any device on your local network",
+  "description": "Cursor Remote Host: run Agent Sessions from any Client on your network",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jon-makinen/cursor-local-remote.git"
+    "url": "https://github.com/adamk33n3r/cursor-local-remote.git"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "cursor",
@@ -18,8 +21,7 @@
     "mobile"
   ],
   "bin": {
-    "cursor-local-remote": "./bin/cursor-remote.mjs",
-    "clr": "./bin/cursor-remote.mjs"
+    "cursor-remote": "./bin/cursor-remote.mjs"
   },
   "files": [
     "bin/",
@@ -39,7 +41,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "tsx --test --test-concurrency=1 --test-reporter=spec test/live-streams.test.ts test/agent-bin.test.ts test/lan-ip.test.ts test/project-key.test.ts test/transcript-fold.test.ts",
+    "test": "node --test test/agent-spawn.test.mjs test/host-cli.test.mjs test/relay-package.test.mjs test/workspace-list.test.mjs && tsx --test --test-concurrency=1 --test-reporter=spec test/live-streams.test.ts test/agent-bin.test.ts test/lan-ip.test.ts test/project-key.test.ts test/transcript-fold.test.ts",
     "prepublishOnly": "npm run build && find .next -name '*.map' -delete"
   },
   "dependencies": {

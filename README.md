@@ -1,8 +1,8 @@
 Edit: Due to Cursor pricing changes, I have moved to Claude Code (that already has this feature). I will no longer be maintaining the project and recommend you fork it and make changes if needed.
 
-# Cursor Local Remote
+# Cursor Remote
 
-Control Cursor from your phone, tablet or any browser on your local network. Great for monitoring and nudging Cursor while in the bathroom, watching a movie or cooking food.
+Control Cursor from any Client (phone, tablet, or browser) on your network. The Host is `@adamk33n3r/cursor-remote` / `cursor-remote`. A separate Relay package is `@adamk33n3r/cursor-remote-relay` / `cursor-remote-relay`.
 
 A local web UI that talks to Cursor's CLI agent on your machine. No cloud, accounts or other bs — just on your local network. Also added some rudimentary security so that you need a key to access it incase you have many in a Wifi network. Important to only use this on trusted network that are safe, because the security is easy to bruteforce if you are in the same network.
 
@@ -22,13 +22,13 @@ The remote UI can see **all** sessions, both ones started in the IDE and ones st
 ## Install
 
 ```bash
-npm install -g cursor-local-remote
+npm install -g @adamk33n3r/cursor-remote
 ```
 
 Then start it:
 
 ```bash
-clr
+cursor-remote
 ```
 
 A QR code pops up in your terminal — scan it from your phone and you're connected.
@@ -36,10 +36,16 @@ A QR code pops up in your terminal — scan it from your phone and you're connec
 ## Updating
 
 ```bash
-clr --update
+cursor-remote --update
 ```
 
-Or the same command as install: `npm install -g cursor-local-remote`
+Or the same command as install: `npm install -g @adamk33n3r/cursor-remote`
+
+Relay (stub, no Host Next.js tarball):
+
+```bash
+npm install -g @adamk33n3r/cursor-remote-relay
+```
 
 I'm actively using this myself on a daily basis, so bugs get noticed and fixed quickly.
 
@@ -48,7 +54,7 @@ I'm actively using this myself on a daily basis, so bugs get noticed and fixed q
 - **QR connect** — scan to connect your phone instantly and continue with phone coding session
 - **Full agent control** — send prompts, pick models, switch modes, stop/retry from any device
 - **Live streaming** — watch responses, tool calls, and file edits in real time
-- **Multi-project** — switch between all your Cursor projects, star favorites, browse sessions across workspaces
+- **Multi-workspace** — switch between known Workspaces, star favorites, browse Sessions across Workspaces
 - **Git panel** — view diffs, commit, push, pull, switch branches — all from the UI
 - **Terminal access** — Access terminal from phone/browser 
 - **Session management** — browse, resume, archive, and export past sessions
@@ -57,19 +63,19 @@ I'm actively using this myself on a daily basis, so bugs get noticed and fixed q
 
 ## Notifications
 
-When the agent finishes a task, CLR notifies you in two ways:
+When the Agent finishes a task, Cursor Remote notifies you in two ways:
 
-**Built-in (no setup):** If the browser tab is in the background, the tab title flashes ("Done! - CLR" or "Error - CLR"), the favicon gets a colored badge, and a sound plays. When you switch back to the tab you'll see a banner showing the result.
+**Built-in (no setup):** If the browser tab is in the background, the tab title flashes ("Done! - Cursor Remote" or "Error - Cursor Remote"), the favicon gets a colored badge, and a sound plays. When you switch back to the tab you'll see a banner showing the result.
 
-**Webhook (optional):** For real push notifications — even with the phone locked or browser closed — you can configure a webhook URL in Settings. When the agent completes, CLR sends a POST with a JSON payload:
+**Webhook (optional):** For real push notifications — even with the phone locked or browser closed — you can configure a webhook URL in Settings. When the Agent completes, Cursor Remote sends a POST with a JSON payload:
 
 ```json
 {
   "event": "agent_complete",
-  "title": "Agent finished - my-project",
+  "title": "Agent finished - my-app",
   "message": "Session abc12345 completed",
   "sessionId": "abc12345-...",
-  "workspace": "/path/to/project",
+  "workspace": "/path/to/workspace",
   "timestamp": 1710000000000
 }
 ```
@@ -85,15 +91,13 @@ Set it up in the Settings panel and hit "Send test" to verify.
 
 ## Usage
 
-`clr` is the short alias for `cursor-local-remote`.
-
 ```
-clr [workspace] [options]
+cursor-remote [workspace] [options]
 ```
 
 | Option | Description |
 | --- | --- |
-| `workspace` | Path to your project folder (defaults to cwd) |
+| `workspace` | Path to the Start directory (defaults to cwd) |
 | `-p, --port` | Port to run on (default: `3100`) |
 | `-t, --token` | Set auth token (otherwise random or `AUTH_TOKEN` env) |
 | `--host` | Bind to specific host/IP (default: `0.0.0.0`) |
@@ -101,20 +105,20 @@ clr [workspace] [options]
 | `--no-qr` | Don't show QR code in terminal |
 | `--no-trust` | Disable workspace trust (agent will ask before actions) |
 | `-v, --verbose` | Show all server and agent output |
-| `-l, --list` | List discovered Cursor projects |
-| `--status` | Check if CLR is already running |
+| `-l, --list` | List known Workspaces |
+| `--status` | Check if a Host is already running |
 | `-u, --update` | Update to the latest version |
 | `-V, --version` | Show version number |
 
 ```bash
-clr                          # current folder
-clr ~/projects/my-app        # specific project
-clr --port 8080              # different port
-clr --token my-secret        # fixed auth token
-clr --host 127.0.0.1         # localhost only
-clr --status                 # check for running instances
-clr --list                   # show all known projects
-clr --no-open --no-qr        # headless-friendly
+cursor-remote                          # current folder
+cursor-remote ~/code/my-app            # specific Workspace
+cursor-remote --port 8080              # different port
+cursor-remote --token my-secret        # fixed Token
+cursor-remote --host 127.0.0.1         # localhost only
+cursor-remote --status                 # check for running Host instances
+cursor-remote --list                   # show all known Workspaces
+cursor-remote --no-open --no-qr        # headless-friendly
 ```
 
 ## How it works
@@ -151,7 +155,7 @@ All endpoints require a valid token (cookie or `Bearer` header).
 | `/api/sessions/watch` | WebSocket | Live Session updates. `id=<sessionId>&workspace=<path>` |
 | `/api/terminal/stream` | WebSocket | In-Host terminal, both ways. `id=<terminalId>` |
 | `/api/terminal/list` | WebSocket | Live terminal roster (spawn, exit, remove) |
-| `/api/projects` | `GET` | List all discovered Cursor projects |
+| `/api/projects` | `GET` | List known Workspaces (`workspaces`, `currentWorkspace`) |
 | `/api/git` | `GET` | Git status, diffs, and branches. `?workspace=<path>&detail=status\|diff\|branches` |
 | `/api/git` | `POST` | Git actions. Body: `{ action, workspace?, message?, files?, branch? }` |
 | `/api/upload` | `POST` | Upload images (multipart/form-data) |
@@ -180,7 +184,7 @@ All endpoints require a valid token (cookie or `Bearer` header).
 Contributions are welcome! Mainly created this so I can use Cursor when I don't feel like being at my desk. The whole project was vibecoded with Cursor, obviously. Run `npm run dev` to start the dev server.
 
 ```bash
-git clone https://github.com/jon-makinen/cursor-local-remote.git
+git clone https://github.com/adamk33n3r/cursor-local-remote.git
 cd cursor-local-remote
 npm install
 npm run dev

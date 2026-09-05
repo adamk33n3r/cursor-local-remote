@@ -2,7 +2,7 @@ import { readdir, stat, readFile, access } from "fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "path";
 import { homedir } from "os";
 import { existsSync, statSync } from "fs";
-import type { StoredSession, ChatMessage, ToolCallInfo, TodoItem, ProjectInfo } from "@/lib/types";
+import type { StoredSession, ChatMessage, ToolCallInfo, TodoItem, WorkspaceInfo } from "@/lib/types";
 import { displayTranscriptText } from "@/lib/transcript-text";
 import { vlog } from "@/lib/verbose";
 
@@ -45,8 +45,8 @@ function projectKeyToWorkspace(key: string): string | null {
   return path;
 }
 
-export async function listProjects(): Promise<ProjectInfo[]> {
-  const projects: ProjectInfo[] = [];
+export async function listCursorCacheWorkspaces(): Promise<WorkspaceInfo[]> {
+  const workspaces: WorkspaceInfo[] = [];
   try {
     const entries = await readdir(CURSOR_PROJECTS_DIR);
     for (const entry of entries) {
@@ -60,12 +60,12 @@ export async function listProjects(): Promise<ProjectInfo[]> {
       const workspace = projectKeyToWorkspace(entry);
       if (!workspace) continue;
       const name = workspace.split(sep).pop() || workspace;
-      projects.push({ name, path: workspace, key: entry });
+      workspaces.push({ name, path: workspace, key: entry });
     }
   } catch {
-    // projects dir doesn't exist or can't be read
+    // Cursor projects cache is missing or unreadable
   }
-  return projects.sort((a, b) => a.name.localeCompare(b.name));
+  return workspaces.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function findTranscriptsDir(workspace: string): Promise<string | null> {
