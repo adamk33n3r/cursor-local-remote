@@ -4,7 +4,7 @@ import { createServer } from "net";
 import { spawn } from "child_process";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { networkInterfaces } from "os";
+import { getLanIp } from "../src/lib/lan-ip.mjs";
 import { randomInt } from "crypto";
 import qrcode from "qrcode-terminal";
 
@@ -62,9 +62,7 @@ const authToken = process.env.AUTH_TOKEN || generateToken();
 
 const isStart = process.argv.includes("--start");
 
-const lanIp = Object.values(networkInterfaces())
-  .flat()
-  .find((a) => a?.family === "IPv4" && !a.internal)?.address;
+const lanIp = await getLanIp();
 
 const localUrl = `http://localhost:${port}`;
 const networkUrl = lanIp ? `http://${lanIp}:${port}` : null;

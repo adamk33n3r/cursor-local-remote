@@ -3,7 +3,8 @@
 import { spawn, execFileSync } from "child_process";
 import { resolve, dirname, join, sep } from "path";
 import { fileURLToPath } from "url";
-import { networkInterfaces, homedir } from "os";
+import { homedir } from "os";
+import { getLanIp } from "../src/lib/lan-ip.mjs";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { randomInt } from "crypto";
 import { createServer } from "net";
@@ -261,18 +262,6 @@ async function findAvailablePort(startPort) {
   return null;
 }
 
-function getLanIp() {
-  const interfaces = networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    const addrs = interfaces[name];
-    if (!addrs) continue;
-    for (const addr of addrs) {
-      if (addr.family === "IPv4" && !addr.internal) return addr.address;
-    }
-  }
-  return null;
-}
-
 const availablePort = await findAvailablePort(portNum);
 if (availablePort === null) {
   console.error(`  Error: no available port found starting from ${portNum}`);
@@ -283,7 +272,7 @@ if (availablePort !== portNum) {
 }
 const port = String(availablePort);
 
-const lanIp = getLanIp();
+const lanIp = await getLanIp();
 const isLocalOnly = hostname === "127.0.0.1" || hostname === "localhost";
 const localUrl = `http://localhost:${port}`;
 const networkUrl = !isLocalOnly && lanIp ? `http://${lanIp}:${port}` : null;
