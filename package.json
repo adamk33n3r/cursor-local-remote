@@ -39,7 +39,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "tsx --test --test-concurrency=1 --test-reporter=spec test/live-streams.test.ts test/agent-bin.test.ts test/lan-ip.test.ts",
+    "test": "tsx --test --test-concurrency=1 --test-reporter=spec test/live-streams.test.ts test/agent-bin.test.ts test/lan-ip.test.ts test/project-key.test.ts test/transcript-fold.test.ts",
     "prepublishOnly": "npm run build && find .next -name '*.map' -delete"
   },
   "dependencies": {

@@ -11,16 +11,36 @@ interface RunningProcess {
   startedAt: number;
 }
 
-let globalExitHook: ProcessExitHook | null = null;
-
-export function setProcessExitHook(hook: ProcessExitHook): void {
-  globalExitHook = hook;
+interface ProcessRegistryState {
+  processes: Map<string, RunningProcess>;
+  exitListeners: Map<string, Set<() => void>>;
+  liveEvents: Map<string, Record<string, unknown>[]>;
+  liveListeners: Map<string, Set<() => void>>;
+  globalExitHook: ProcessExitHook | null;
 }
 
-const processes = new Map<string, RunningProcess>();
-const exitListeners = new Map<string, Set<() => void>>();
-const liveEvents = new Map<string, Record<string, unknown>[]>();
-const liveListeners = new Map<string, Set<() => void>>();
+declare global {
+  // Next HMR and the Host upgrade handler can load this module twice.
+  // eslint-disable-next-line no-var
+  var __processRegistry: ProcessRegistryState | undefined;
+}
+
+const state: ProcessRegistryState = globalThis.__processRegistry ?? (globalThis.__processRegistry = {
+  processes: new Map(),
+  exitListeners: new Map(),
+  liveEvents: new Map(),
+  liveListeners: new Map(),
+  globalExitHook: null,
+});
+
+const processes = state.processes;
+const exitListeners = state.exitListeners;
+const liveEvents = state.liveEvents;
+const liveListeners = state.liveListeners;
+
+export function setProcessExitHook(hook: ProcessExitHook): void {
+  state.globalExitHook = hook;
+}
 
 export function pushLiveEvent(sessionId: string, event: Record<string, unknown>): void {
   let events = liveEvents.get(sessionId);
@@ -51,6 +71,33 @@ export function onLiveUpdate(sessionId: string, cb: () => void): () => void {
   return () => { captured.delete(cb); };
 }
 
+function isLiveTranscriptEvent(event: Record<string, unknown>): boolean {
+  const type = event.type;
+  return type === "user" || type === "assistant" || type === "thinking";
+}
+
+function attachStdoutLiveFeed(entry: RunningProcess): void {
+  let buffer = "";
+  entry.child.stdout?.on("data", (chunk: Buffer) => {
+    buffer += chunk.toString();
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    const sid = entry.sessionId ?? entry.mapKey;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const event = JSON.parse(trimmed) as Record<string, unknown>;
+        if (isLiveTranscriptEvent(event)) {
+          pushLiveEvent(sid, event);
+        }
+      } catch {
+        // non-json line
+      }
+    }
+  });
+}
+
 export function registerProcess(
   requestId: string,
   child: ChildProcess,
@@ -64,6 +111,7 @@ export function registerProcess(
     startedAt: Date.now(),
   };
   processes.set(requestId, entry);
+  attachStdoutLiveFeed(entry);
 
   const onExit = () => {
     const sid = entry.sessionId ?? entry.mapKey;
@@ -73,9 +121,9 @@ export function registerProcess(
       exitListeners.delete(entry.mapKey);
       for (const cb of listeners) cb();
     }
-    if (globalExitHook && entry.sessionId) {
+    if (state.globalExitHook && entry.sessionId) {
       try {
-        globalExitHook(sid, entry.workspace);
+        state.globalExitHook(sid, entry.workspace);
       } catch {
         // don't let push errors break process cleanup
       }
@@ -92,7 +140,6 @@ export function registerProcess(
 
 export function onProcessExit(sessionId: string, cb: () => void): () => void {
   if (!processes.has(sessionId)) {
-    cb();
     return () => {};
   }
   let set = exitListeners.get(sessionId);
@@ -105,6 +152,13 @@ export function onProcessExit(sessionId: string, cb: () => void): () => void {
   return () => { captured.delete(cb); };
 }
 
+function moveMapKey<T>(map: Map<string, T>, from: string, to: string, merge: (prev: T | undefined, incoming: T) => T): void {
+  const incoming = map.get(from);
+  if (!incoming) return;
+  map.set(to, merge(map.get(to), incoming));
+  map.delete(from);
+}
+
 export function promoteToSessionId(requestId: string, sessionId: string): void {
   const entry = processes.get(requestId);
   if (!entry) return;
@@ -113,6 +167,17 @@ export function promoteToSessionId(requestId: string, sessionId: string): void {
     processes.set(sessionId, entry);
     processes.delete(requestId);
     entry.mapKey = sessionId;
+    moveMapKey(exitListeners, requestId, sessionId, (prev, incoming) => {
+      if (!prev) return incoming;
+      for (const cb of incoming) prev.add(cb);
+      return prev;
+    });
+    moveMapKey(liveEvents, requestId, sessionId, (prev, incoming) => (prev ? prev.concat(incoming) : incoming));
+    moveMapKey(liveListeners, requestId, sessionId, (prev, incoming) => {
+      if (!prev) return incoming;
+      for (const cb of incoming) prev.add(cb);
+      return prev;
+    });
   }
 }
 

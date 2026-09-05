@@ -22,10 +22,12 @@ import {
 } from "@/lib/terminal-registry";
 import {
   getSessionModifiedAt,
+  foldSameRoleText,
   parseLiveEvents,
   readSessionMessages,
   resolveJsonlPath,
 } from "@/lib/transcript-reader";
+import type { ChatMessage, ToolCallInfo } from "@/lib/types";
 import { sessionIdParam } from "@/lib/validation";
 import { vlog } from "@/lib/verbose";
 import { getWorkspace } from "@/lib/workspace";
@@ -96,6 +98,38 @@ function sendEvent(ws: WebSocket, event: string, data: unknown): void {
   ws.send(JSON.stringify({ event, data }));
 }
 
+function messageKey(message: ChatMessage): string {
+  return `${message.role}:${message.content.replace(/\s+/g, " ").trim()}`;
+}
+
+function mergeTranscript(
+  fromFile: { messages: ChatMessage[]; toolCalls: ToolCallInfo[] },
+  fromLive: { messages: ChatMessage[]; toolCalls: ToolCallInfo[] },
+): { messages: ChatMessage[]; toolCalls: ToolCallInfo[] } {
+  const seen = new Set(fromFile.messages.map(messageKey));
+  const messages = [...fromFile.messages];
+  for (const message of fromLive.messages) {
+    const key = messageKey(message);
+    if (seen.has(key)) continue;
+    const last = messages[messages.length - 1];
+    if (last && last.role === message.role) {
+      last.content = foldSameRoleText(last.content, message.content);
+      seen.add(messageKey(last));
+      continue;
+    }
+    seen.add(key);
+    messages.push(message);
+  }
+  const toolSeen = new Set(fromFile.toolCalls.map((t) => t.id));
+  const toolCalls = [...fromFile.toolCalls];
+  for (const call of fromLive.toolCalls) {
+    if (toolSeen.has(call.id)) continue;
+    toolSeen.add(call.id);
+    toolCalls.push(call);
+  }
+  return { messages, toolCalls };
+}
+
 export function handleLiveHttpRequest(req: IncomingMessage, res: ServerResponse): boolean {
   if (!liveKind(req.url)) return false;
   res.writeHead(426, { "Content-Type": "application/json" });
@@ -120,6 +154,7 @@ async function attachWatchSocket(ws: WebSocket, req: IncomingMessage): Promise<v
   vlog("watch", "WebSocket connect", { sessionId, workspace, jsonlPath: jsonlPath ?? "null", isActive: active });
 
   if (!jsonlPath && !active) {
+    console.warn(`[watch] ${sessionId} not found (no jsonl, not active) workspace=${workspace}`);
     vlog("watch", "session not found — no jsonl and not active", sessionId);
     ws.close(1008, "session not found");
     return;
@@ -129,6 +164,7 @@ async function attachWatchSocket(ws: WebSocket, req: IncomingMessage): Promise<v
   let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let filePollTimer: ReturnType<typeof setInterval> | null = null;
+  let liveDebounce: ReturnType<typeof setTimeout> | null = null;
   let unsubExit: (() => void) | null = null;
   let unsubLive: (() => void) | null = null;
   let lastSentModified = 0;
@@ -137,6 +173,7 @@ async function attachWatchSocket(ws: WebSocket, req: IncomingMessage): Promise<v
   function cleanup(): void {
     cancelled = true;
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+    if (liveDebounce) { clearTimeout(liveDebounce); liveDebounce = null; }
     if (filePollTimer) { clearInterval(filePollTimer); filePollTimer = null; }
     if (unsubExit) { unsubExit(); unsubExit = null; }
     if (unsubLive) { unsubLive(); unsubLive = null; }
@@ -167,53 +204,87 @@ async function attachWatchSocket(ws: WebSocket, req: IncomingMessage): Promise<v
     try {
       const modifiedAt = await getSessionModifiedAt(workspace, sessionId);
       if (modifiedAt <= lastSentModified) {
-        vlog("watch", "skipping update — not modified", { sessionId, modifiedAt, lastSentModified });
+        vlog("watch", "skipping file update — not modified", { sessionId, modifiedAt, lastSentModified });
         return;
       }
 
-      const { messages, toolCalls } = await readSessionMessages(workspace, sessionId);
+      const fromFile = await readSessionMessages(workspace, sessionId);
+      const live = parseLiveEvents(getLiveEvents(sessionId), sessionId);
+      const merged = mergeTranscript(fromFile, live);
       lastSentModified = modifiedAt;
-      vlog("watch", "pushing file update", { sessionId, messages: messages.length, toolCalls: toolCalls.length, modifiedAt });
-      sendEvent(ws, "update", { messages, toolCalls, modifiedAt, isActive: isActive(sessionId) });
+      vlog("watch", "pushing file update", { sessionId, messages: merged.messages.length, toolCalls: merged.toolCalls.length, modifiedAt });
+      sendEvent(ws, "update", { messages: merged.messages, toolCalls: merged.toolCalls, modifiedAt: Math.max(modifiedAt, Date.now()), isActive: isActive(sessionId) });
     } catch (err) {
       vlog("watch", "pushFileUpdate error", sessionId, String(err));
     }
   };
 
+  const pushLiveSnapshot = async () => {
+    if (cancelled) return;
+    const live = parseLiveEvents(getLiveEvents(sessionId), sessionId);
+    const fromFile = jsonlPath
+      ? await readSessionMessages(workspace, sessionId)
+      : { messages: [], toolCalls: [], modifiedAt: 0 };
+    const merged = mergeTranscript(fromFile, live);
+    const modifiedAt = Math.max(fromFile.modifiedAt, Date.now());
+    if (fromFile.modifiedAt > lastSentModified) lastSentModified = fromFile.modifiedAt;
+    vlog("watch", "pushing live snapshot", {
+      sessionId,
+      fileMessages: fromFile.messages.length,
+      liveMessages: live.messages.length,
+      merged: merged.messages.length,
+    });
+    sendEvent(ws, "update", {
+      messages: merged.messages,
+      toolCalls: merged.toolCalls,
+      modifiedAt,
+      isActive: isActive(sessionId),
+    });
+  };
+
+  unsubLive = onLiveUpdate(sessionId, () => {
+    if (cancelled) return;
+    if (liveDebounce) clearTimeout(liveDebounce);
+    liveDebounce = setTimeout(() => {
+      liveDebounce = null;
+      void pushLiveSnapshot();
+    }, LIVE_DEBOUNCE_MS);
+  });
+
   if (jsonlPath) {
-    const { messages, toolCalls, modifiedAt: initialModified } = await readSessionMessages(workspace, sessionId);
-    lastSentModified = initialModified;
-    vlog("watch", "sending connected (file)", { sessionId, messages: messages.length, toolCalls: toolCalls.length, modifiedAt: initialModified, isActive: isActive(sessionId) });
-    sendEvent(ws, "connected", { messages, toolCalls, modifiedAt: initialModified, isActive: isActive(sessionId) });
+    const fromFile = await readSessionMessages(workspace, sessionId);
+    const live = parseLiveEvents(getLiveEvents(sessionId), sessionId);
+    const merged = mergeTranscript(fromFile, live);
+    lastSentModified = fromFile.modifiedAt;
+    vlog("watch", "sending connected (file+live)", {
+      sessionId,
+      fileMessages: fromFile.messages.length,
+      liveMessages: live.messages.length,
+      merged: merged.messages.length,
+      modifiedAt: fromFile.modifiedAt,
+      isActive: isActive(sessionId),
+    });
+    sendEvent(ws, "connected", {
+      messages: merged.messages,
+      toolCalls: merged.toolCalls,
+      modifiedAt: Math.max(fromFile.modifiedAt, Date.now()),
+      isActive: isActive(sessionId),
+    });
     startFileWatcher(jsonlPath, pushFileUpdate);
   } else {
     const events = getLiveEvents(sessionId);
     const { messages, toolCalls } = parseLiveEvents(events, sessionId);
     vlog("watch", "sending connected (live)", { sessionId, liveEvents: events.length, messages: messages.length, toolCalls: toolCalls.length });
-    sendEvent(ws, "connected", { messages, toolCalls, modifiedAt: Date.now(), isActive: true });
-
-    let liveDebounce: ReturnType<typeof setTimeout> | null = null;
-    unsubLive = onLiveUpdate(sessionId, () => {
-      if (cancelled) return;
-      if (liveDebounce) clearTimeout(liveDebounce);
-      liveDebounce = setTimeout(() => {
-        if (cancelled) return;
-        const latest = getLiveEvents(sessionId);
-        const parsed = parseLiveEvents(latest, sessionId);
-        vlog("watch", "pushing live update", { sessionId, messages: parsed.messages.length, toolCalls: parsed.toolCalls.length });
-        sendEvent(ws, "update", { messages: parsed.messages, toolCalls: parsed.toolCalls, modifiedAt: Date.now(), isActive: isActive(sessionId) });
-      }, LIVE_DEBOUNCE_MS);
-    });
+    sendEvent(ws, "connected", { messages, toolCalls, modifiedAt: Date.now(), isActive: isActive(sessionId) });
 
     filePollTimer = setInterval(() => {
       void (async () => {
         if (cancelled) return;
         const path = await resolveJsonlPath(workspace, sessionId);
         if (!path) return;
-        vlog("watch", "jsonl file appeared during poll, switching to file watcher", { sessionId, path });
+        vlog("watch", "jsonl file appeared during poll, adding file watcher", { sessionId, path });
         jsonlPath = path;
         if (filePollTimer) { clearInterval(filePollTimer); filePollTimer = null; }
-        if (unsubLive) { unsubLive(); unsubLive = null; }
         startFileWatcher(path, pushFileUpdate);
         void pushFileUpdate();
       })();

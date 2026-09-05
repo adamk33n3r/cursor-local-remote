@@ -370,6 +370,7 @@ export function ChatContainer({
         onForceSend={forceSendQueued}
         onEditQueued={editQueued}
         onDeleteQueued={deleteQueued}
+        sessionOpen={!!sessionId}
       />
 
       <ChatInput

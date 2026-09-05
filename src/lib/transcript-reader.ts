@@ -1,5 +1,5 @@
 import { readdir, stat, readFile, access } from "fs/promises";
-import { join, resolve, sep } from "path";
+import { isAbsolute, join, relative, resolve, sep } from "path";
 import { homedir } from "os";
 import { existsSync, statSync } from "fs";
 import type { StoredSession, ChatMessage, ToolCallInfo, TodoItem, ProjectInfo } from "@/lib/types";
@@ -7,9 +7,26 @@ import { vlog } from "@/lib/verbose";
 
 const CURSOR_PROJECTS_DIR = join(homedir(), ".cursor", "projects");
 
+/** Cursor stores transcripts under ~/.cursor/projects/<key>/ where key is the
+ * absolute workspace with separators turned into hyphens (`D:\dev\foo` → `D-dev-foo`). */
 export function workspaceToProjectKey(workspace: string): string {
-  const abs = resolve(workspace);
-  return abs.replace(/^\//, "").replace(/\//g, "-");
+  return resolve(workspace)
+    .replace(/\\/g, "/")
+    .replace(/\/$/, "")
+    .replace(":", "")
+    .replace(/^\//, "")
+    .replace(/\//g, "-");
+}
+
+export function workspaceToProjectKeyCandidates(workspace: string): string[] {
+  const key = workspaceToProjectKey(workspace);
+  const lower = key.toLowerCase();
+  return lower === key ? [key] : [key, lower];
+}
+
+export function isPathInside(parent: string, child: string): boolean {
+  const rel = relative(resolve(parent), resolve(child));
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 function projectKeyToWorkspace(key: string): string | null {
@@ -51,16 +68,18 @@ export async function listProjects(): Promise<ProjectInfo[]> {
 }
 
 async function findTranscriptsDir(workspace: string): Promise<string | null> {
-  const key = workspaceToProjectKey(workspace);
-  const dir = join(CURSOR_PROJECTS_DIR, key, "agent-transcripts");
-  try {
-    await access(dir);
-    vlog("reader", "transcripts dir found", dir);
-    return dir;
-  } catch {
-    vlog("reader", "transcripts dir not found", dir, "workspace", workspace, "key", key);
-    return null;
+  const keys = workspaceToProjectKeyCandidates(workspace);
+  for (const key of keys) {
+    const dir = join(CURSOR_PROJECTS_DIR, key, "agent-transcripts");
+    try {
+      await access(dir);
+      vlog("reader", "transcripts dir found", dir);
+      return dir;
+    } catch {
+      vlog("reader", "transcripts dir miss", dir, "workspace", workspace, "key", key);
+    }
   }
+  return null;
 }
 
 async function parseJsonlEntries(jsonlPath: string): Promise<Record<string, unknown>[]> {
@@ -83,7 +102,7 @@ async function parseJsonlEntries(jsonlPath: string): Promise<Record<string, unkn
 
 async function extractFirstUserMessage(jsonlPath: string): Promise<string> {
   for (const entry of await parseJsonlEntries(jsonlPath)) {
-    if (entry.role === "user") {
+    if (entryRole(entry) === "user") {
       const msg = entry.message as Record<string, unknown> | undefined;
       const content = msg?.content as Array<Record<string, unknown>> | undefined;
       const text: string = (content?.[0]?.text as string) || "";
@@ -171,6 +190,38 @@ function stripXmlTags(text: string): string {
     .trim();
 }
 
+function entryRole(entry: Record<string, unknown>): string {
+  if (typeof entry.role === "string") return entry.role;
+  if (typeof entry.type === "string") return entry.type;
+  const msg = entry.message as Record<string, unknown> | undefined;
+  if (msg && typeof msg.role === "string") return msg.role;
+  return "";
+}
+
+function textFromContentParts(contentArr: unknown[]): string {
+  const textParts: string[] = [];
+  for (const part of contentArr) {
+    if (typeof part !== "object" || part === null) continue;
+    const p = part as Record<string, unknown>;
+    if (p.type === "text" && typeof p.text === "string") {
+      textParts.push(p.text);
+    } else if (p.type === "thinking" && typeof (p.thinking ?? p.text) === "string") {
+      textParts.push(String(p.thinking ?? p.text));
+    }
+  }
+  return textParts.join("");
+}
+
+function extractEventText(entry: Record<string, unknown>): string {
+  if (typeof entry.text === "string") return entry.text;
+  if (typeof entry.delta === "string") return entry.delta;
+  const msg = entry.message as Record<string, unknown> | undefined;
+  if (!msg) return "";
+  if (typeof msg.content === "string") return msg.content;
+  if (Array.isArray(msg.content)) return textFromContentParts(msg.content);
+  return "";
+}
+
 export interface SessionHistoryResult {
   messages: ChatMessage[];
   toolCalls: ToolCallInfo[];
@@ -186,7 +237,7 @@ export async function resolveJsonlPath(workspace: string, sessionId: string): Pr
 
   const resolvedDir = resolve(dir);
   const entryPath = resolve(dir, sessionId);
-  if (!entryPath.startsWith(resolvedDir + "/")) {
+  if (!isPathInside(resolvedDir, entryPath)) {
     vlog("reader", "resolveJsonlPath: path traversal blocked", { entryPath, resolvedDir });
     return null;
   }
@@ -303,6 +354,18 @@ function extractToolCallsFromContent(
   return calls;
 }
 
+/** Stream-json often repeats a growing snapshot, not a delta. Concatenating those doubles the reply. */
+export function foldSameRoleText(existing: string, incoming: string): string {
+  if (incoming.startsWith(existing)) return incoming;
+  if (existing.startsWith(incoming)) return existing;
+  const a = existing.trimEnd();
+  const b = incoming.trimEnd();
+  if (b.startsWith(a)) return incoming;
+  if (a.startsWith(b)) return existing;
+  if (a === b) return incoming.length >= existing.length ? incoming : existing;
+  return existing + incoming;
+}
+
 export function parseLiveEvents(
   events: Record<string, unknown>[],
   sessionId: string,
@@ -313,28 +376,38 @@ export function parseLiveEvents(
   const baseTimestamp = Date.now() - 60_000;
 
   for (const event of events) {
-    const role = event.type as string;
-    if (role !== "user" && role !== "assistant") continue;
+    const role = entryRole(event);
+    if (role !== "user" && role !== "assistant" && role !== "thinking") continue;
 
-    const contentArr = (event.message as Record<string, unknown> | undefined)?.content;
-    if (!Array.isArray(contentArr)) continue;
-
-    const textParts: string[] = [];
-    for (const part of contentArr) {
-      if ((part as Record<string, unknown>).type === "text" && (part as Record<string, unknown>).text) {
-        textParts.push((part as Record<string, unknown>).text as string);
-      }
-    }
-
-    let text = textParts.join("");
+    let text = extractEventText(event);
     if (role === "user") {
       text = stripXmlTags(text);
     }
 
+    const contentArr = (event.message as Record<string, unknown> | undefined)?.content;
+    const prev = messages[messages.length - 1];
+
+    if (role === "thinking") {
+      if (!text.trim()) continue;
+      if (prev && prev.id.endsWith("-thinking")) {
+        prev.content = foldSameRoleText(prev.content, text);
+      } else if (!prev || prev.role !== "assistant") {
+        messages.push({
+          id: `${sessionId}-live-thinking`,
+          role: "assistant",
+          content: text,
+          timestamp: baseTimestamp + counter.n,
+        });
+      }
+      continue;
+    }
+
     if (text.trim()) {
-      const prev = messages[messages.length - 1];
-      if (prev && prev.role === role) {
-        prev.content += text;
+      if (role === "assistant" && prev && prev.id.endsWith("-thinking")) {
+        prev.id = `${sessionId}-live-${counter.n++}`;
+        prev.content = text;
+      } else if (prev && prev.role === role) {
+        prev.content = foldSameRoleText(prev.content, text);
       } else {
         messages.push({
           id: `${sessionId}-live-${counter.n++}`,
@@ -345,7 +418,7 @@ export function parseLiveEvents(
       }
     }
 
-    if (role === "assistant") {
+    if (role === "assistant" && Array.isArray(contentArr)) {
       toolCalls.push(...extractToolCallsFromContent(contentArr, sessionId, counter, baseTimestamp));
     }
   }
@@ -379,26 +452,19 @@ export async function readSessionMessages(workspace: string, sessionId: string):
   let skippedEntries = 0;
 
   for (const entry of entries) {
-    const role = entry.role as string;
+    const role = entryRole(entry);
     if (role !== "user" && role !== "assistant") {
       skippedEntries++;
       continue;
     }
 
     const contentArr = (entry.message as Record<string, unknown> | undefined)?.content;
-    if (!Array.isArray(contentArr)) {
+    let text = extractEventText(entry);
+    if (!text.trim() && !Array.isArray(contentArr)) {
       skippedEntries++;
       continue;
     }
 
-    const textParts: string[] = [];
-    for (const part of contentArr) {
-      if (part.type === "text" && part.text) {
-        textParts.push(part.text);
-      }
-    }
-
-    let text = textParts.join("");
     if (role === "user") {
       text = stripXmlTags(text);
     }
@@ -406,7 +472,7 @@ export async function readSessionMessages(workspace: string, sessionId: string):
     if (text.trim()) {
       const prev = messages[messages.length - 1];
       if (prev && prev.role === role) {
-        prev.content += text;
+        prev.content = foldSameRoleText(prev.content, text);
       } else {
         messages.push({
           id: `${sessionId}-${counter.n++}`,
@@ -417,7 +483,7 @@ export async function readSessionMessages(workspace: string, sessionId: string):
       }
     }
 
-    if (role === "assistant") {
+    if (role === "assistant" && Array.isArray(contentArr)) {
       toolCalls.push(...extractToolCallsFromContent(contentArr, sessionId, counter, baseTimestamp));
     }
   }

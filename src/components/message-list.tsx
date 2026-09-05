@@ -21,6 +21,7 @@ interface MessageListProps {
   onForceSend?: (id: string) => void;
   onEditQueued?: (id: string, newContent: string) => void;
   onDeleteQueued?: (id: string) => void;
+  sessionOpen?: boolean;
 }
 
 interface TimelineItem {
@@ -181,6 +182,7 @@ export function MessageList({
   onForceSend,
   onEditQueued,
   onDeleteQueued,
+  sessionOpen,
 }: MessageListProps) {
   const haptics = useHaptics();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -286,9 +288,11 @@ export function MessageList({
         <div className="flex flex-col items-center max-w-sm">
           <p className="text-text-secondary text-[13px] font-medium mb-1">Cursor Remote</p>
           <p className="text-text-muted text-[12px] leading-relaxed">
-            Send a message to start an agent session.
+            {sessionOpen
+              ? "This session has no messages yet. Send a prompt to continue it."
+              : "Send a message to start an agent session."}
           </p>
-          {onSelectSession && (
+          {!sessionOpen && onSelectSession && (
             <RecentSessions sessions={recentSessions} onSelect={onSelectSession} />
           )}
         </div>

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { spawnAgent } from "@/lib/cursor-cli";
 import { getWorkspace } from "@/lib/workspace";
 import { upsertSession } from "@/lib/session-store";
-import { registerProcess, promoteToSessionId, pushLiveEvent, setProcessExitHook } from "@/lib/process-registry";
+import { registerProcess, promoteToSessionId, setProcessExitHook } from "@/lib/process-registry";
 import { chatRequestSchema, parseBody } from "@/lib/validation";
 import { badRequest, serverError, safeErrorMessage, parseJsonBody } from "@/lib/errors";
 import { AGENT_INIT_TIMEOUT_MS } from "@/lib/constants";
@@ -36,9 +36,10 @@ function waitForSessionId(
       buffer = lines.pop() || "";
 
       for (const line of lines) {
-        if (!line.trim()) continue;
+        const trimmed = line.trim();
+        if (!trimmed) continue;
         try {
-          const event = JSON.parse(line);
+          const event = JSON.parse(trimmed);
 
           if (!found && event.type === "system" && event.subtype === "init" && event.session_id) {
             found = true;
@@ -47,10 +48,6 @@ function waitForSessionId(
             void upsertSession(event.session_id, workspace, prompt);
             promoteToSessionId(requestId, event.session_id);
             resolve(event.session_id);
-          }
-
-          if (resolvedSessionId && (event.type === "user" || event.type === "assistant")) {
-            pushLiveEvent(resolvedSessionId, event);
           }
         } catch {
           // non-json line

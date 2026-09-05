@@ -89,10 +89,10 @@ export function useSessionWatch(options: UseSessionWatchOptions = {}) {
   }, []);
 
   const applyUpdate = useCallback((data: WatchPayload) => {
+    if (data.messages && data.messages.length > 0) mergeMessages(data.messages);
+    if (data.toolCalls && data.toolCalls.length > 0) setToolCalls(data.toolCalls);
     if (data.modifiedAt && data.modifiedAt > lastModifiedRef.current) {
       lastModifiedRef.current = data.modifiedAt;
-      if (data.messages && data.messages.length > 0) mergeMessages(data.messages);
-      if (data.toolCalls && data.toolCalls.length > 0) setToolCalls(data.toolCalls);
     }
   }, [mergeMessages]);
 

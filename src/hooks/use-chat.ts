@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import type { ChatMessage, AgentMode } from "@/lib/types";
 import { apiFetch } from "@/lib/api-fetch";
 import { uuid } from "@/lib/uuid";
-import { STREAMING_HEALTH_CHECK_MS } from "@/lib/constants";
+import { AGENT_INIT_TIMEOUT_MS, STREAMING_HEALTH_CHECK_MS } from "@/lib/constants";
 import { vlog } from "@/lib/verbose";
 import { useSessionWatch } from "./use-session-watch";
 import { useMessageQueue } from "./use-message-queue";
@@ -174,6 +174,7 @@ export function useChat(initialModel = "auto", initialWorkspace?: string): UseCh
         const res = await apiFetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          timeoutMs: AGENT_INIT_TIMEOUT_MS + 5_000,
           body: JSON.stringify({
             prompt,
             sessionId: sessionIdRef.current ?? undefined,
