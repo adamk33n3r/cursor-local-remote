@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getLanIp } from "../lib/lan-ip.mjs";
-import { createRelayHandler } from "../lib/relay-http.mjs";
+import { listenWithNext } from "../lib/listen-with-next.mjs";
 
 const DEFAULT_PORT = 3200;
 const DEFAULT_BIND = "0.0.0.0";
@@ -89,35 +89,59 @@ function resolveLogin(configPath) {
   return loginFromConfig(configPath);
 }
 
+function listenPlain(port, bind, handler) {
+  const server = createServer(handler);
+  server.on("error", (err) => {
+    console.error(`  Error: ${err.message}`);
+    process.exit(1);
+  });
+  return new Promise((resolve) => {
+    server.listen(port, bind, () => resolve(server));
+  });
+}
+
 const { port, bind, configPath } = parseArgs(process.argv.slice(2));
 const login = resolveLogin(configPath);
 const loopbackOnly = bind === "127.0.0.1" || bind === "localhost";
 
-const server = createServer(createRelayHandler(login));
-server.on("error", (err) => {
-  console.error(`  Error: ${err.message}`);
-  process.exit(1);
-});
+if (login) {
+  process.env.LOGIN_USERNAME = login.username;
+  process.env.LOGIN_PASSWORD = login.password;
+}
 
-server.listen(port, bind, async () => {
-  const lanIp = loopbackOnly ? null : await getLanIp();
-  const localUrl = `http://localhost:${port}`;
-  const networkUrl = lanIp ? `http://${lanIp}:${port}` : null;
+let server;
+if (!login) {
+  server = await listenPlain(port, bind, (_req, res) => {
+    res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Host list is not served until Login credentials are set.\n");
+  });
+} else {
+  try {
+    server = await listenWithNext(port, bind);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`  Error: ${message}`);
+    process.exit(1);
+  }
+}
 
+const lanIp = loopbackOnly ? null : await getLanIp();
+const localUrl = `http://localhost:${port}`;
+const networkUrl = lanIp ? `http://${lanIp}:${port}` : null;
+
+console.log("");
+console.log("  Cursor Remote Relay");
+console.log(`  Local:    ${localUrl}`);
+if (networkUrl) {
+  console.log(`  Network:  ${networkUrl}`);
+}
+console.log("");
+if (!login) {
+  console.log("  Host list will not be served until Login credentials are set.");
   console.log("");
-  console.log("  Cursor Remote Relay");
-  console.log(`  Local:    ${localUrl}`);
-  if (networkUrl) {
-    console.log(`  Network:  ${networkUrl}`);
-  }
-  console.log("");
-  if (!login) {
-    console.log("  Host list will not be served until Login credentials are set.");
-    console.log("");
-  }
-  console.log("  Press Ctrl+C to stop");
-  console.log("");
-});
+}
+console.log("  Press Ctrl+C to stop");
+console.log("");
 
 function shutdown() {
   server.close(() => process.exit(0));

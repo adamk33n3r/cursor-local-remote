@@ -9,10 +9,10 @@ const relayPkgPath = join(root, "packages", "cursor-remote-relay", "package.json
 
 test("Relay is a separate package without the Host Next.js tarball", () => {
   const relay = JSON.parse(readFileSync(relayPkgPath, "utf8"));
+  const host = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   assert.equal(relay.name, "@adamk33n3r/cursor-remote-relay");
   assert.deepEqual(Object.keys(relay.bin), ["cursor-remote-relay"]);
   assert.equal(relay.bin["cursor-remote-relay"], "./bin/cursor-remote-relay.mjs");
-  const files = relay.files ?? [];
-  assert.equal(files.some((f) => String(f).includes(".next")), false);
-  assert.equal("next" in (relay.dependencies ?? {}), false);
+  assert.equal(host.name, "@adamk33n3r/cursor-remote");
+  assert.equal("@adamk33n3r/cursor-remote" in (relay.dependencies ?? {}), false);
 });

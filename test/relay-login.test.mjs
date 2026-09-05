@@ -133,7 +133,7 @@ test("stdout prints localhost and LAN Host-list URLs only, with no Token or Logi
   );
   t.after(() => stopRelay(proc));
 
-  const stdout = await waitForStdout(proc, /Press Ctrl\+C to stop/);
+  const stdout = await waitForStdout(proc, /Press Ctrl\+C to stop/, 60_000);
   assert.match(stdout, new RegExp(`http://localhost:${port}\\b`));
   assert.doesNotMatch(stdout, /token/i);
   assert.doesNotMatch(stdout, /QR/i);
@@ -160,7 +160,7 @@ test("set Login: HttpOnly cookie lasts seven days and Host list is empty", async
     relayEnv({ LOGIN_USERNAME: "relay-user", LOGIN_PASSWORD: "correct-horse" }),
   );
   t.after(() => stopRelay(proc));
-  await waitForStdout(proc, /Press Ctrl\+C to stop/);
+  await waitForStdout(proc, /Press Ctrl\+C to stop/, 60_000);
 
   const splash = await fetch(`http://127.0.0.1:${port}/`);
   assert.equal(splash.status, 200);
@@ -189,8 +189,8 @@ test("set Login: HttpOnly cookie lasts seven days and Host list is empty", async
   });
   assert.ok(loginRes.status === 302 || loginRes.status === 303);
   const cookies = loginRes.headers.getSetCookie();
-  assert.equal(cookies.length, 1);
-  const cookie = cookies[0];
+  const cookie = cookies.find((c) => c.startsWith("cr_login="));
+  assert.ok(cookie, `expected cr_login Set-Cookie, got ${JSON.stringify(cookies)}`);
   assert.match(cookie, /HttpOnly/i);
   assert.match(cookie, new RegExp(`Max-Age=${SEVEN_DAYS_S}\\b`, "i"));
   assert.doesNotMatch(cookie, /correct-horse/);
@@ -202,6 +202,7 @@ test("set Login: HttpOnly cookie lasts seven days and Host list is empty", async
   assert.equal(listRes.status, 200);
   const listHtml = await listRes.text();
   assert.match(listHtml, /Host/i);
+  assert.match(listHtml, /Logout/i);
   assert.doesNotMatch(listHtml, /data-host-id=/);
   const hostRows = listHtml.match(/data-host-row/g) ?? [];
   assert.equal(hostRows.length, 0);
@@ -211,6 +212,15 @@ test("set Login: HttpOnly cookie lasts seven days and Host list is empty", async
   });
   assert.equal(hostsJson.status, 200);
   assert.deepEqual(await hostsJson.json(), { hosts: [] });
+
+  const logoutRes = await fetch(`http://127.0.0.1:${port}/logout`, {
+    method: "POST",
+    headers: { cookie: cookieHeader },
+    redirect: "manual",
+  });
+  assert.ok(logoutRes.status === 302 || logoutRes.status === 303);
+  const afterLogout = await fetch(`http://127.0.0.1:${port}/hosts`);
+  assert.equal(afterLogout.status, 401);
 });
 
 test("Login username and password can come from a config file", async (t) => {
@@ -222,7 +232,7 @@ test("Login username and password can come from a config file", async (t) => {
   const port = await freePort();
   const proc = startRelay(["--port", String(port), "--config", configPath], relayEnv());
   t.after(() => stopRelay(proc));
-  await waitForStdout(proc, /Press Ctrl\+C to stop/);
+  await waitForStdout(proc, /Press Ctrl\+C to stop/, 60_000);
 
   const loginRes = await fetch(`http://127.0.0.1:${port}/login`, {
     method: "POST",
@@ -231,7 +241,11 @@ test("Login username and password can come from a config file", async (t) => {
     body: "username=cfg-user&password=cfg-pass",
   });
   assert.ok(loginRes.status === 302 || loginRes.status === 303);
-  assert.equal(loginRes.headers.getSetCookie().length, 1);
+  const cookies = loginRes.headers.getSetCookie();
+  assert.ok(
+    cookies.some((c) => c.startsWith("cr_login=")),
+    `expected cr_login Set-Cookie, got ${JSON.stringify(cookies)}`,
+  );
 });
 
 test("starting Relay never starts a Host", async (t) => {
@@ -241,7 +255,7 @@ test("starting Relay never starts a Host", async (t) => {
     relayEnv({ LOGIN_USERNAME: "relay-user", LOGIN_PASSWORD: "correct-horse" }),
   );
   t.after(() => stopRelay(proc));
-  const stdout = await waitForStdout(proc, /Press Ctrl\+C to stop/);
+  const stdout = await waitForStdout(proc, /Press Ctrl\+C to stop/, 60_000);
 
   assert.doesNotMatch(stdout, /Workspace:/);
   assert.doesNotMatch(stdout, /Auth token:/);

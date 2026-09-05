@@ -20,10 +20,30 @@
   "files": [
     "bin/",
     "lib/",
+    "src/",
+    "next.config.mjs",
+    "postcss.config.mjs",
+    "tsconfig.json",
+    ".next/server/",
+    ".next/static/",
+    ".next/*.json",
+    ".next/BUILD_ID",
+    ".next/package.json",
     "Dockerfile"
   ],
   "scripts": {
+    "build": "next build",
+    "prepublishOnly": "next build",
     "test": "node --test ../../test/relay-package.test.mjs ../../test/relay-login.test.mjs"
+  },
+  "dependencies": {
+    "next": "^15.5.12",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.1",
+    "tailwindcss": "^4.2.1"
   },
   "publishConfig": {
     "access": "public"

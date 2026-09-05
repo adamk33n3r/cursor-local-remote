@@ -18,6 +18,12 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", "packages/cursor-remote-relay"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "lib/**/*.d.ts",
+    ".next/types/**/*.ts",
+    "next-env.d.ts"
+  ],
+  "exclude": ["node_modules"]
 }

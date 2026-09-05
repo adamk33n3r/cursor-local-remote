@@ -4,13 +4,23 @@ import nextConfig from "eslint-config-next";
 import prettierConfig from "eslint-config-prettier";
 
 export default tseslint.config(
-  { ignores: [".next/", "node_modules/", "bin/"] },
+  {
+    ignores: [
+      ".next/",
+      "node_modules/",
+      "bin/",
+      ".worktrees/",
+      "**/next-env.d.ts",
+      "packages/cursor-remote-relay/.next/",
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.strict,
   ...nextConfig,
   prettierConfig,
   {
     files: ["**/*.{ts,tsx}"],
+    ignores: ["packages/cursor-remote-relay/**"],
     languageOptions: {
       parserOptions: {
         projectService: true,

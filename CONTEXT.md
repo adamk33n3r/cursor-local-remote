@@ -21,8 +21,8 @@ A Host setting the User who starts the Host can turn on: the Host uses Cursor (t
 _Avoid_: GUI mode, IDE mode, drive mode, CDP mode (in spec copy), Agent mode
 
 **Relay**:
-The LAN process Hosts connect out to. It is not a Host and not Cursor Remote's UI.
-_Avoid_: server, hub, gateway, proxy (as the process name)
+The LAN process Hosts connect out to. It is not a Host and not Cursor Remote's UI. It serves Login and the Host list to a Client.
+_Avoid_: server, hub, gateway, proxy (as the process name), Relay UI, web UI (as a product)
 
 **Tunnel**:
 The Host's outbound connection to the Relay. After Login and pick, the Relay reverse-proxies that Host's HTTP (page load and APIs) and WebSocket (live streams) over it. Direct LAN Clients do not use the Tunnel.
