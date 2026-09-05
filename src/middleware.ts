@@ -130,6 +130,13 @@ function unauthorizedHtml(wrongToken = false): string {
 }
 
 export function middleware(req: NextRequest) {
+  // Live streams are HTTP upgrades on the Host server, not App Router
+  // responses. Acting on them here (especially a token redirect) leaves
+  // the browser WebSocket stuck in CONNECTING until something else retries.
+  if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
+    return NextResponse.next();
+  }
+
   const token = process.env.AUTH_TOKEN?.toLowerCase();
   if (!token) {
     return NextResponse.next();
@@ -174,5 +181,7 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|icon.png|apple-icon.png|sw.js).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|_next/webpack-hmr|favicon.ico|manifest.webmanifest|icon.png|apple-icon.png|sw.js|api/terminal/stream|api/sessions/watch).*)",
+  ],
 };

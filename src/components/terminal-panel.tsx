@@ -56,7 +56,10 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [spawning, setSpawning] = useState(false);
+  const [debugLine, setDebugLine] = useState("terminal: idle");
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
+  const pendingStdinRef = useRef<Map<string, string[]>>(new Map());
+  const pendingOutputRef = useRef<Map<string, string[]>>(new Map());
   const xtermsRef = useRef<Map<string, XtermEntry>>(new Map());
   const containerRefsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const haptics = useHaptics();
@@ -112,6 +115,11 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
 
     const entry: XtermEntry = { term, fit, opened: false, disposed: false };
     xtermsRef.current.set(id, entry);
+    const buffered = pendingOutputRef.current.get(id);
+    if (buffered?.length) {
+      pendingOutputRef.current.delete(id);
+      for (const chunk of buffered) term.write(chunk);
+    }
     return entry;
   }, []);
 
@@ -127,12 +135,36 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
   }, []);
 
   const connectStream = useCallback((id: string) => {
-    if (socketsRef.current.has(id)) return;
-    const entry = getOrCreateXterm(id);
-    if (!entry) return;
+    const existing = socketsRef.current.get(id);
+    if (existing && existing.readyState === WebSocket.OPEN) return;
+    if (existing && existing.readyState === WebSocket.CONNECTING) return;
 
-    const ws = new WebSocket(liveWebSocketUrl(`/api/terminal/stream?id=${encodeURIComponent(id)}`));
+    const url = liveWebSocketUrl(`/api/terminal/stream?id=${encodeURIComponent(id)}`);
+    console.log("[terminal:ws] connecting", url);
+    const ws = new WebSocket(url);
     socketsRef.current.set(id, ws);
+
+    const writeOutput = (chunk: string) => {
+      const entry = getOrCreateXterm(id);
+      if (entry) {
+        entry.term.write(chunk);
+        return;
+      }
+      const queued = pendingOutputRef.current.get(id) ?? [];
+      queued.push(chunk);
+      pendingOutputRef.current.set(id, queued);
+    };
+
+    ws.addEventListener("open", () => {
+      setDebugLine(`ws OPEN id=${id}`);
+      console.log("[terminal:ws] open", id, ws.readyState);
+      const queued = pendingStdinRef.current.get(id) ?? [];
+      pendingStdinRef.current.delete(id);
+      for (const data of queued) {
+        console.log("[terminal:send] flush", id, JSON.stringify(data).slice(0, 80));
+        ws.send(JSON.stringify({ type: "input", data }));
+      }
+    });
 
     ws.addEventListener("message", (e) => {
       let parsed: unknown;
@@ -151,13 +183,17 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
 
       switch (rec.event) {
         case "connected":
-          if (data.output) entry.term.write(data.output);
+          setDebugLine(`ws connected id=${id} output=${data.output?.length ?? 0}B running=${String(data.running)}`);
+          console.log("[terminal:recv] connected", id, { running: data.running, outputBytes: data.output?.length ?? 0 });
+          if (data.output) writeOutput(data.output);
           setTabs((prev) =>
             prev.map((t) => t.id === id ? { ...t, running: data.running ?? t.running, exitCode: data.exitCode ?? t.exitCode } : t),
           );
           return;
         case "output":
-          if (data.data) entry.term.write(data.data);
+          setDebugLine(`ws recv output ${data.data?.length ?? 0}B`);
+          console.log("[terminal:recv] output", id, JSON.stringify(data.data ?? "").slice(0, 120));
+          if (data.data) writeOutput(data.data);
           setTabs((prev) =>
             prev.map((t) => t.id === id ? { ...t, running: data.running ?? t.running, exitCode: data.exitCode ?? t.exitCode } : t),
           );
@@ -170,11 +206,14 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
     });
 
     ws.addEventListener("error", () => {
+      setDebugLine(`ws ERROR id=${id}`);
       console.error("[terminal] WebSocket error", id);
     });
 
-    ws.addEventListener("close", () => {
+    ws.addEventListener("close", (ev) => {
       socketsRef.current.delete(id);
+      setDebugLine(`ws CLOSE id=${id} code=${ev.code} ${ev.reason}`);
+      console.log("[terminal:ws] close", id, ev.code, ev.reason);
     });
   }, [getOrCreateXterm]);
 
@@ -187,6 +226,8 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
 
       for (const ws of socketsRef.current.values()) ws.close();
       socketsRef.current.clear();
+      pendingStdinRef.current.clear();
+      pendingOutputRef.current.clear();
       for (const entry of xtermsRef.current.values()) {
         entry.disposed = true;
         entry.term.dispose();
@@ -227,6 +268,8 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
     return () => {
       for (const ws of socketsRef.current.values()) ws.close();
       socketsRef.current.clear();
+      pendingStdinRef.current.clear();
+      pendingOutputRef.current.clear();
       for (const entry of xtermsRef.current.values()) {
         entry.disposed = true;
         entry.term.dispose();
@@ -269,6 +312,8 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
   const cleanupTerminal = useCallback((id: string) => {
     const socket = socketsRef.current.get(id);
     if (socket) { socket.close(); socketsRef.current.delete(id); }
+    pendingStdinRef.current.delete(id);
+    pendingOutputRef.current.delete(id);
     const entry = xtermsRef.current.get(id);
     if (entry) { entry.disposed = true; entry.term.dispose(); xtermsRef.current.delete(id); }
     containerRefsRef.current.delete(id);
@@ -304,12 +349,25 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
 
   const sendStdin = useCallback((id: string, data: string) => {
     const ws = socketsRef.current.get(id);
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.error("[terminal] WebSocket is not open; cannot send input");
+    console.log("[terminal:send]", {
+      id,
+      readyState: ws?.readyState ?? "none",
+      bytes: data.length,
+      preview: JSON.stringify(data).slice(0, 80),
+    });
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "input", data }));
+      setDebugLine(`sent ${data.length}B to ${id} (ws OPEN)`);
       return;
     }
-    ws.send(JSON.stringify({ type: "input", data }));
-  }, []);
+    const queued = pendingStdinRef.current.get(id) ?? [];
+    queued.push(data);
+    pendingStdinRef.current.set(id, queued);
+    setDebugLine(`queued ${data.length}B to ${id} readyState=${ws?.readyState ?? "none"}`);
+    if (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) {
+      connectStream(id);
+    }
+  }, [connectStream]);
 
   const handleSendStdin = useCallback((text: string) => {
     if (!activeTab || !text) return;
@@ -318,9 +376,18 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
   }, [activeTab, sendStdin]);
 
   const handleSubmit = useCallback(() => {
-    if (!current || !isRunning) return;
+    if (!current || !isRunning) {
+      console.log("[terminal:send] blocked", { hasTab: Boolean(current), isRunning, activeTab });
+      setDebugLine(`send blocked running=${String(isRunning)} tab=${activeTab ?? "none"}`);
+      return;
+    }
+    if (!input) {
+      console.log("[terminal:send] empty input");
+      setDebugLine("send blocked: empty input");
+      return;
+    }
     handleSendStdin(input);
-  }, [input, current, isRunning, handleSendStdin]);
+  }, [input, current, isRunning, handleSendStdin, activeTab]);
 
   const handleCtrlC = useCallback(() => {
     if (!activeTab) return;
@@ -381,7 +448,9 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
           </div>
         </div>
 
-        {/* Tabs */}
+        <div className="px-3 py-1 border-b border-border text-[10px] font-mono text-text-muted truncate" title={debugLine}>
+          {debugLine}
+        </div>
         {tabs.length > 0 && (
           <div className="shrink-0 flex items-center gap-0.5 px-2 py-1 border-b border-border overflow-x-auto">
             {tabs.map((t, i) => (
@@ -471,6 +540,12 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
                   className="flex-1 min-w-0 bg-transparent text-[13px] font-mono text-text placeholder:text-text-muted/50 focus:outline-none"
                   autoFocus
                 />
+                <button
+                  type="submit"
+                  className="shrink-0 px-2 py-1 rounded-md text-[11px] text-text-secondary hover:bg-bg-hover transition-colors"
+                >
+                  Send
+                </button>
                 <button
                   type="button"
                   onClick={handleCtrlC}

@@ -33,6 +33,13 @@ import { getWorkspace } from "@/lib/workspace";
 export const LIVE_WATCH_PATH = "/api/sessions/watch";
 export const LIVE_TERMINAL_PATH = "/api/terminal/stream";
 
+function liveKind(url: string | undefined): "watch" | "terminal" | null {
+  const pathname = livePathname(url);
+  if (pathname === LIVE_WATCH_PATH) return "watch";
+  if (pathname === LIVE_TERMINAL_PATH) return "terminal";
+  return null;
+}
+
 const COOKIE_NAME = "cr_session";
 
 type AttachLiveWebSockets = (
@@ -90,8 +97,7 @@ function sendEvent(ws: WebSocket, event: string, data: unknown): void {
 }
 
 export function handleLiveHttpRequest(req: IncomingMessage, res: ServerResponse): boolean {
-  const pathname = livePathname(req.url);
-  if (pathname !== LIVE_WATCH_PATH && pathname !== LIVE_TERMINAL_PATH) return false;
+  if (!liveKind(req.url)) return false;
   res.writeHead(426, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error: "WebSocket required" }));
   return true;
@@ -271,18 +277,6 @@ function parseTerminalClientMessage(raw: string): TerminalClientMessage | null {
   return { type: "input", data: rec.data };
 }
 
-function handleTerminalClientMessage(id: string, msg: TerminalClientMessage): void {
-  switch (msg.type) {
-    case "input":
-      writeToTerminal(id, msg.data);
-      return;
-    default: {
-      const _never: never = msg.type;
-      return _never;
-    }
-  }
-}
-
 function attachTerminalSocket(ws: WebSocket, req: IncomingMessage): void {
   const url = new URL(req.url ?? "/", "http://localhost");
   const id = url.searchParams.get("id");
@@ -296,6 +290,8 @@ function attachTerminalSocket(ws: WebSocket, req: IncomingMessage): void {
     ws.close(1008, "terminal not found");
     return;
   }
+
+  console.warn(`[terminal] ${id} Client connected`);
 
   let cancelled = false;
   let unsub: (() => void) | null = null;
@@ -340,9 +336,16 @@ function attachTerminalSocket(ws: WebSocket, req: IncomingMessage): void {
   keepaliveTimer.unref();
 
   ws.on("message", (raw) => {
+    const preview = String(raw).slice(0, 200);
     const msg = parseTerminalClientMessage(String(raw));
-    if (!msg) return;
-    handleTerminalClientMessage(id, msg);
+    if (!msg) {
+      console.warn(`[terminal] ${id} dropped stdin (not type:input JSON): ${preview}`);
+      return;
+    }
+    const ok = writeToTerminal(id, msg.data);
+    console.warn(
+      `[terminal] ${id} stdin ok=${ok} running=${Boolean(getTerminal(id)?.running)} bytes=${msg.data.length} ${JSON.stringify(msg.data.slice(0, 80))}`,
+    );
   });
   ws.on("close", cleanup);
   ws.on("error", (err) => {
@@ -367,9 +370,11 @@ export function attachLiveWebSockets(
     wss.close();
   });
 
-  server.on("upgrade", (req, socket, head) => {
+  const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const pathname = livePathname(req.url);
-    if (pathname !== LIVE_WATCH_PATH && pathname !== LIVE_TERMINAL_PATH) {
+    const kind = liveKind(req.url);
+    console.warn(`[upgrade] ${req.url ?? pathname}`);
+    if (!kind) {
       if (fallbackUpgrade) {
         fallbackUpgrade(req, socket, head);
         return;
@@ -379,23 +384,56 @@ export function attachLiveWebSockets(
     }
 
     if (!isAuthorized(req)) {
+      console.warn(`[upgrade] ${kind} 401`);
       rejectUpgrade(socket, 401, "Unauthorized");
       return;
     }
 
-    if (pathname === LIVE_WATCH_PATH) {
+    if (kind === "watch") {
       wss.handleUpgrade(req, socket, head, (ws) => {
         trackLiveSocket(liveSockets, ws);
         void attachWatchSocket(ws, req);
       });
       return;
     }
+    if (kind === "terminal") {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        trackLiveSocket(liveSockets, ws);
+        attachTerminalSocket(ws, req);
+      });
+      return;
+    }
+    const _never: never = kind;
+    return _never;
+  };
 
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      trackLiveSocket(liveSockets, ws);
-      attachTerminalSocket(ws, req);
-    });
-  });
+  server.prependListener("upgrade", onUpgrade);
+
+  const rawOn = server.on.bind(server);
+  const rawAddListener = server.addListener.bind(server);
+  const rawPrepend = server.prependListener.bind(server);
+  const ignoreForeignUpgrade = (
+    original: typeof rawOn,
+    event: string | symbol,
+    listener: (...args: unknown[]) => void,
+  ) => {
+    if (event === "upgrade" && listener !== onUpgrade) {
+      console.warn("[upgrade] blocked extra listener");
+      return server;
+    }
+    return original(event, listener);
+  };
+  server.on = ((event: string | symbol, listener: (...args: unknown[]) => void) =>
+    ignoreForeignUpgrade(rawOn, event, listener)) as typeof server.on;
+  server.addListener = ((event: string | symbol, listener: (...args: unknown[]) => void) =>
+    ignoreForeignUpgrade(rawAddListener, event, listener)) as typeof server.addListener;
+  server.prependListener = ((event: string | symbol, listener: (...args: unknown[]) => void) => {
+    if (event === "upgrade" && listener !== onUpgrade) {
+      console.warn("[upgrade] blocked extra prepend listener");
+      return server;
+    }
+    return rawPrepend(event, listener);
+  }) as typeof server.prependListener;
 }
 
 globalThis.__attachLiveWebSockets = attachLiveWebSockets;

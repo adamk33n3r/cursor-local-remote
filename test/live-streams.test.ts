@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -46,6 +47,10 @@ function waitForJson(ws: WebSocket): Promise<{ event: string; data: Record<strin
 
 async function closeWs(ws: WebSocket): Promise<void> {
   if (ws.readyState === WebSocket.CLOSED) return;
+  if (ws.readyState === WebSocket.CONNECTING) {
+    ws.terminate();
+    return;
+  }
   await new Promise<void>((resolve) => {
     ws.once("close", () => resolve());
     if (ws.readyState !== WebSocket.CLOSING) ws.close();
@@ -126,6 +131,50 @@ test("Client can connect a terminal WebSocket and observe traffic both ways", as
 
   ws.send(JSON.stringify({ type: "input", data: `echo ${marker}\n` }));
   await sawMarker;
+});
+
+test("terminal WebSocket does not wait on a stuck HMR upgrade", async (t) => {
+  const hanging: Duplex[] = [];
+  const server = createServer((req, res) => {
+    if (!handleLiveHttpRequest(req, res)) {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  attachLiveWebSockets(server, (_req, socket) => {
+    hanging.push(socket);
+  });
+  const term = spawnTerminal(process.cwd());
+  const sockets: WebSocket[] = [];
+
+  t.after(async () => {
+    for (const socket of hanging) socket.destroy();
+    for (const ws of sockets) ws.terminate();
+    killTerminal(term.id);
+    removeTerminal(term.id);
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+      server.closeAllConnections();
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.listen(0, "127.0.0.1", () => resolve());
+    server.on("error", reject);
+  });
+  const port = (server.address() as AddressInfo).port;
+
+  const hmr = new WebSocket(`ws://127.0.0.1:${port}/_next/webpack-hmr`);
+  hmr.on("error", () => {});
+  sockets.push(hmr);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(hmr.readyState, WebSocket.CONNECTING);
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/api/terminal/stream?id=${term.id}`);
+  sockets.push(ws);
+  const connected = await waitForJson(ws);
+  assert.equal(connected.event, "connected");
+  assert.equal(hmr.readyState, WebSocket.CONNECTING);
 });
 
 test("SSE endpoints are not the live path for session watch or terminal", async (t) => {

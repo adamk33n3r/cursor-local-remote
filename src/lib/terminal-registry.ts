@@ -152,8 +152,13 @@ export function removeTerminal(id: string): boolean {
 export function writeToTerminal(id: string, data: string): boolean {
   const entry = terminals.get(id);
   if (!entry || !entry.running) return false;
-  entry.child.stdin?.write(data);
-  return true;
+  const stdin = entry.child.stdin;
+  if (!stdin || stdin.destroyed) return false;
+  // cmd.exe line-edits on CRLF; a bare LF is ignored and looks like Send did nothing.
+  const payload = process.platform === "win32" && data !== "\x03"
+    ? data.replace(/(?<!\r)\n/g, "\r\n")
+    : data;
+  return stdin.write(payload);
 }
 
 export function onTerminalOutput(id: string, cb: () => void): () => void {

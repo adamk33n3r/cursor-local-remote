@@ -148,8 +148,8 @@ All endpoints require a valid token (cookie or `Bearer` header).
 | `/api/sessions/active` | `GET` | List currently running agent session IDs |
 | `/api/sessions/active` | `DELETE` | Kill a running agent process. Body: `{ sessionId }` |
 | `/api/sessions/history` | `GET` | Full transcript for a session. `?id=<sessionId>&workspace=<path>` |
-| `/api/sessions/watch` | WebSocket | Live Session updates. `?id=<sessionId>&workspace=<path>` |
-| `/api/terminal/stream` | WebSocket | In-Host terminal, both ways. `?id=<terminalId>` |
+| `/api/sessions/watch` | WebSocket | Live Session updates. `id=<sessionId>&workspace=<path>` |
+| `/api/terminal/stream` | WebSocket | In-Host terminal, both ways. `id=<terminalId>` |
 | `/api/projects` | `GET` | List all discovered Cursor projects |
 | `/api/git` | `GET` | Git status, diffs, and branches. `?workspace=<path>&detail=status\|diff\|branches` |
 | `/api/git` | `POST` | Git actions. Body: `{ action, workspace?, message?, files?, branch? }` |
