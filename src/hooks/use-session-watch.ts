@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import type { ChatMessage, ToolCallInfo } from "@/lib/types";
 import { apiFetch } from "@/lib/api-fetch";
 import { liveWebSocketUrl } from "@/lib/live-ws-url";
+import { displayTranscriptText, normalizeUserPrompt } from "@/lib/transcript-text";
 import { vlog } from "@/lib/verbose";
 
 export interface SessionWatchState {
@@ -72,19 +73,27 @@ export function useSessionWatch(options: UseSessionWatchOptions = {}) {
 
   const mergeMessages = useCallback((incoming: ChatMessage[]) => {
     setMessages((prev) => {
-      const incomingIds = new Set(incoming.map((m) => m.id));
+      const cleaned = incoming.map((m) => {
+        const content = displayTranscriptText(m.content);
+        return content === m.content ? m : { ...m, content };
+      });
+      const incomingIds = new Set(cleaned.map((m) => m.id));
       const incomingUserTexts = new Set(
-        incoming.filter((m) => m.role === "user").map((m) => m.content.trim()),
+        cleaned.filter((m) => m.role === "user").map((m) => normalizeUserPrompt(m.content)),
       );
-      const optimistic = prev.filter(
-        (m) =>
-          m.role === "user" &&
-          !incomingIds.has(m.id) &&
-          !incomingUserTexts.has(m.content.trim()),
-      );
-      vlog("watch-client", "mergeMessages", { incoming: incoming.length, prev: prev.length, optimistic: optimistic.length });
-      if (optimistic.length === 0) return incoming;
-      return [...incoming, ...optimistic];
+      const optimistic = prev.filter((m) => {
+        if (m.role !== "user" || incomingIds.has(m.id)) return false;
+        const prompt = normalizeUserPrompt(m.content);
+        if (!prompt) return false;
+        if (incomingUserTexts.has(prompt)) return false;
+        for (const incomingText of incomingUserTexts) {
+          if (incomingText.endsWith(prompt) || incomingText.includes(prompt)) return false;
+        }
+        return true;
+      });
+      vlog("watch-client", "mergeMessages", { incoming: cleaned.length, prev: prev.length, optimistic: optimistic.length });
+      if (optimistic.length === 0) return cleaned;
+      return [...cleaned, ...optimistic];
     });
   }, []);
 

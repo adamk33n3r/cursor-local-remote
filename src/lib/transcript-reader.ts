@@ -3,6 +3,7 @@ import { isAbsolute, join, relative, resolve, sep } from "path";
 import { homedir } from "os";
 import { existsSync, statSync } from "fs";
 import type { StoredSession, ChatMessage, ToolCallInfo, TodoItem, ProjectInfo } from "@/lib/types";
+import { displayTranscriptText } from "@/lib/transcript-text";
 import { vlog } from "@/lib/verbose";
 
 const CURSOR_PROJECTS_DIR = join(homedir(), ".cursor", "projects");
@@ -106,10 +107,7 @@ async function extractFirstUserMessage(jsonlPath: string): Promise<string> {
       const msg = entry.message as Record<string, unknown> | undefined;
       const content = msg?.content as Array<Record<string, unknown>> | undefined;
       const text: string = (content?.[0]?.text as string) || "";
-      return text
-        .replace(/<[^>]+>/g, "")
-        .trim()
-        .slice(0, 120);
+      return displayTranscriptText(text).slice(0, 120);
     }
   }
   return "";
@@ -180,14 +178,6 @@ export async function readCursorSessions(workspace: string): Promise<StoredSessi
   }
 
   return sessions.sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-function stripXmlTags(text: string): string {
-  return text
-    .replace(/<user_query>\n?/g, "")
-    .replace(/<\/user_query>\n?/g, "")
-    .replace(/<[^>]+>/g, "")
-    .trim();
 }
 
 function entryRole(entry: Record<string, unknown>): string {
@@ -379,10 +369,7 @@ export function parseLiveEvents(
     const role = entryRole(event);
     if (role !== "user" && role !== "assistant" && role !== "thinking") continue;
 
-    let text = extractEventText(event);
-    if (role === "user") {
-      text = stripXmlTags(text);
-    }
+    const text = displayTranscriptText(extractEventText(event));
 
     const contentArr = (event.message as Record<string, unknown> | undefined)?.content;
     const prev = messages[messages.length - 1];
@@ -459,14 +446,10 @@ export async function readSessionMessages(workspace: string, sessionId: string):
     }
 
     const contentArr = (entry.message as Record<string, unknown> | undefined)?.content;
-    let text = extractEventText(entry);
+    const text = displayTranscriptText(extractEventText(entry));
     if (!text.trim() && !Array.isArray(contentArr)) {
       skippedEntries++;
       continue;
-    }
-
-    if (role === "user") {
-      text = stripXmlTags(text);
     }
 
     if (text.trim()) {
