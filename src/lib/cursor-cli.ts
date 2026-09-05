@@ -1,19 +1,21 @@
 import { spawn, execFileSync, type ChildProcess } from "child_process";
 import type { AgentMode } from "@/lib/types";
+import { resolveAgentBin, type ResolvedAgent } from "@/lib/agent-bin";
 import { getConfig } from "@/lib/session-store";
 
-let agentChecked = false;
+let resolved: ResolvedAgent | null = null;
 
-function ensureAgentOnPath(): void {
-  if (agentChecked) return;
-  try {
-    execFileSync("agent", ["--version"], { stdio: "ignore", timeout: 5_000 });
-    agentChecked = true;
-  } catch {
-    throw new Error(
-      "Could not find the 'agent' CLI. Make sure Cursor is installed and the CLI is on your PATH.",
-    );
-  }
+function agentLaunch(): ResolvedAgent {
+  if (resolved) return resolved;
+  const candidate = resolveAgentBin();
+  execFileSync(candidate.command, [...candidate.prefixArgs, "--version"], {
+    stdio: "ignore",
+    timeout: 8_000,
+    windowsHide: true,
+    env: { ...process.env, ...candidate.extraEnv },
+  });
+  resolved = candidate;
+  return candidate;
 }
 
 export interface AgentOptions {
@@ -32,8 +34,15 @@ async function shouldTrust(): Promise<boolean> {
 }
 
 export async function spawnAgent(options: AgentOptions): Promise<ChildProcess> {
-  ensureAgentOnPath();
-  const args = ["-p", options.prompt, "--output-format", "stream-json", "--stream-partial-output"];
+  const agent = agentLaunch();
+  const args = [
+    ...agent.prefixArgs,
+    "-p",
+    options.prompt,
+    "--output-format",
+    "stream-json",
+    "--stream-partial-output",
+  ];
 
   if (await shouldTrust()) {
     args.push("--trust");
@@ -51,9 +60,13 @@ export async function spawnAgent(options: AgentOptions): Promise<ChildProcess> {
     args.push("--mode", options.mode);
   }
 
-  return spawn("agent", args, {
+  return spawn(agent.command, args, {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env },
+    windowsHide: true,
+    env: { ...process.env, ...agent.extraEnv },
   });
 }
 
+export function agentExecFile() {
+  return agentLaunch();
+}

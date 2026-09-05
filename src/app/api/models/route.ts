@@ -1,6 +1,7 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
 import type { ModelInfo } from "@/lib/types";
+import { agentExecFile } from "@/lib/cursor-cli";
 import { serverError, safeErrorMessage } from "@/lib/errors";
 import { MODELS_CACHE_TTL_MS, MODELS_FETCH_TIMEOUT_MS } from "@/lib/constants";
 import { getConfig } from "@/lib/session-store";
@@ -52,9 +53,12 @@ export async function GET() {
     const trustConfig = trustEnv === "0" ? false : trustEnv === "1" ? true : (await getConfig("trust")) !== "0";
     if (trustConfig) agentArgs.push("--trust");
 
-    const { stdout } = await execFileAsync("agent", agentArgs, {
+    const agent = agentExecFile();
+    const { stdout } = await execFileAsync(agent.command, [...agent.prefixArgs, ...agentArgs], {
       encoding: "utf-8",
       timeout: MODELS_FETCH_TIMEOUT_MS,
+      windowsHide: true,
+      env: { ...process.env, ...agent.extraEnv },
     });
 
     const models = parseModels(stdout);

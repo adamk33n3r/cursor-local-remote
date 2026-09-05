@@ -102,10 +102,15 @@ export async function POST(req: Request) {
     }
 
     const verbose = process.env.CLR_VERBOSE === "1";
-
+    let stderrBuf = "";
     child.stderr?.on("data", (chunk: Buffer) => {
-      const text = chunk.toString().trim();
-      if (text) console.error("[agent stderr]", text);
+      stderrBuf += chunk.toString();
+      const lines = stderrBuf.split(/\r?\n/);
+      stderrBuf = lines.pop() ?? "";
+      for (const line of lines) {
+        const text = line.trim();
+        if (text) console.log("[agent]", text);
+      }
     });
 
     if (verbose) {
