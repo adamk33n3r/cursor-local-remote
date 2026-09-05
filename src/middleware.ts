@@ -182,6 +182,6 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|_next/webpack-hmr|favicon.ico|manifest.webmanifest|icon.png|apple-icon.png|sw.js|api/terminal/stream|api/sessions/watch).*)",
+    "/((?!_next/static|_next/image|_next/webpack-hmr|favicon.ico|manifest.webmanifest|icon.png|apple-icon.png|sw.js|api/terminal/stream|api/terminal/list|api/sessions/watch).*)",
   ],
 };

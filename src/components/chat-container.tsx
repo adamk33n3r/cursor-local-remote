@@ -5,6 +5,7 @@ import { useChat } from "@/hooks/use-chat";
 import { useHaptics } from "@/hooks/use-haptics";
 import { useSound } from "@/hooks/use-sound";
 import { useNotification } from "@/hooks/use-notification";
+import { useTerminalList } from "@/hooks/use-terminal-list";
 import { apiFetch } from "@/lib/api-fetch";
 import { vlog } from "@/lib/verbose";
 import type { StoredSession } from "@/lib/types";
@@ -73,8 +74,7 @@ export function ChatContainer({
   const [gitInfo, setGitInfo] = useState<{ branch: string; changedFiles: number } | null>(null);
   const [gitPanelOpen, setGitPanelOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
-  const [terminalCount, setTerminalCount] = useState(0);
-  const terminalPollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const terminals = useTerminalList();
   const prevMsgCountRef = useRef(0);
   const loadedInitialRef = useRef(false);
   const prevStreamingRef = useRef(false);
@@ -182,22 +182,9 @@ export function ChatContainer({
     }
   }, [messages, toolCalls, sessionId, haptics]);
 
-  const fetchTerminalCount = useCallback(() => {
-    apiFetch("/api/terminal")
-      .then((r) => r.json())
-      .then((data) => {
-        const all: { cwd: string }[] = data.terminals || [];
-        const count = workspace ? all.filter((t) => t.cwd === workspace).length : all.length;
-        setTerminalCount(count);
-      })
-      .catch(() => {});
-  }, [workspace]);
-
-  useEffect(() => {
-    fetchTerminalCount();
-    terminalPollRef.current = setInterval(fetchTerminalCount, 10_000);
-    return () => clearInterval(terminalPollRef.current);
-  }, [fetchTerminalCount]);
+  const terminalCount = workspace
+    ? terminals.filter((t) => t.cwd === workspace).length
+    : terminals.length;
 
   useEffect(() => {
     if (!workspace) return;
@@ -404,7 +391,6 @@ export function ChatContainer({
         open={terminalOpen}
         onClose={() => setTerminalOpen(false)}
         workspace={workspace || undefined}
-        onCountChange={(n) => { setTerminalCount(n); }}
       />
     </div>
   );

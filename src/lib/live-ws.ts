@@ -17,6 +17,8 @@ import {
 import {
   getTerminal,
   getTerminalOutput,
+  listTerminals,
+  onTerminalListChange,
   onTerminalOutput,
   writeToTerminal,
 } from "@/lib/terminal-registry";
@@ -34,11 +36,13 @@ import { getWorkspace } from "@/lib/workspace";
 
 export const LIVE_WATCH_PATH = "/api/sessions/watch";
 export const LIVE_TERMINAL_PATH = "/api/terminal/stream";
+export const LIVE_TERMINAL_LIST_PATH = "/api/terminal/list";
 
-function liveKind(url: string | undefined): "watch" | "terminal" | null {
+function liveKind(url: string | undefined): "watch" | "terminal" | "terminal-list" | null {
   const pathname = livePathname(url);
   if (pathname === LIVE_WATCH_PATH) return "watch";
   if (pathname === LIVE_TERMINAL_PATH) return "terminal";
+  if (pathname === LIVE_TERMINAL_LIST_PATH) return "terminal-list";
   return null;
 }
 
@@ -425,6 +429,44 @@ function attachTerminalSocket(ws: WebSocket, req: IncomingMessage): void {
   });
 }
 
+function attachTerminalListSocket(ws: WebSocket): void {
+  let cancelled = false;
+  let unsub: (() => void) | null = null;
+  let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+
+  function cleanup(): void {
+    cancelled = true;
+    if (unsub) { unsub(); unsub = null; }
+    if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = null; }
+  }
+
+  function push(event: "connected" | "update"): void {
+    sendEvent(ws, event, { terminals: listTerminals() });
+  }
+
+  push("connected");
+  unsub = onTerminalListChange(() => {
+    if (cancelled) return;
+    push("update");
+  });
+
+  keepaliveTimer = setInterval(() => {
+    if (cancelled) return;
+    if (ws.readyState !== WebSocket.OPEN) {
+      cleanup();
+      return;
+    }
+    ws.ping();
+  }, WS_KEEPALIVE_MS);
+  keepaliveTimer.unref();
+
+  ws.on("close", cleanup);
+  ws.on("error", (err) => {
+    vlog("terminal-list", "WebSocket error", String(err));
+    cleanup();
+  });
+}
+
 function trackLiveSocket(liveSockets: Set<WebSocket>, ws: WebSocket): void {
   liveSockets.add(ws);
   ws.on("close", () => liveSockets.delete(ws));
@@ -471,6 +513,13 @@ export function attachLiveWebSockets(
       wss.handleUpgrade(req, socket, head, (ws) => {
         trackLiveSocket(liveSockets, ws);
         attachTerminalSocket(ws, req);
+      });
+      return;
+    }
+    if (kind === "terminal-list") {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        trackLiveSocket(liveSockets, ws);
+        attachTerminalListSocket(ws);
       });
       return;
     }

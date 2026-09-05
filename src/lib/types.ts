@@ -74,3 +74,11 @@ export interface ProjectInfo {
   path: string;
   key: string;
 }
+
+export interface TerminalInfo {
+  id: string;
+  cwd: string;
+  running: boolean;
+  exitCode: number | null;
+  startedAt: number;
+}

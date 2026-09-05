@@ -45,6 +45,30 @@ function waitForJson(ws: WebSocket): Promise<{ event: string; data: Record<strin
   });
 }
 
+function waitForListUpdate(
+  ws: WebSocket,
+  pred: (terminals: { id: string }[]) => boolean,
+): Promise<{ event: string; data: Record<string, unknown> }> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for terminal list update")), 8_000);
+    const onMessage = (raw: Buffer | ArrayBuffer | Buffer[]) => {
+      const msg = JSON.parse(String(raw)) as { event: string; data: Record<string, unknown> };
+      if (msg.event !== "update") return;
+      const terminals = msg.data.terminals as { id: string }[];
+      if (!Array.isArray(terminals) || !pred(terminals)) return;
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      resolve(msg);
+    };
+    ws.on("message", onMessage);
+    ws.once("error", (err) => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      reject(err);
+    });
+  });
+}
+
 async function closeWs(ws: WebSocket): Promise<void> {
   if (ws.readyState === WebSocket.CLOSED) return;
   if (ws.readyState === WebSocket.CONNECTING) {
@@ -133,6 +157,46 @@ test("Client can connect a terminal WebSocket and observe traffic both ways", as
   await sawMarker;
 });
 
+test("Client can watch the terminal roster over WebSocket", async (t) => {
+  const { server, port } = await listen();
+  const term = spawnTerminal(process.cwd());
+  const sockets: WebSocket[] = [];
+
+  t.after(async () => {
+    await Promise.all(sockets.map((ws) => closeWs(ws)));
+    killTerminal(term.id);
+    removeTerminal(term.id);
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+      server.closeAllConnections();
+    });
+  });
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/api/terminal/list`);
+  sockets.push(ws);
+
+  const connected = await waitForJson(ws);
+  assert.equal(connected.event, "connected");
+  const initial = connected.data.terminals as { id: string }[];
+  assert.ok(Array.isArray(initial));
+  assert.ok(initial.some((item) => item.id === term.id));
+  const knownIds = new Set(initial.map((item) => item.id));
+
+  const spawnedP = waitForListUpdate(ws, (terminals) => terminals.some((item) => !knownIds.has(item.id)));
+  const extra = spawnTerminal(process.cwd());
+  t.after(() => {
+    killTerminal(extra.id);
+    removeTerminal(extra.id);
+  });
+  const spawned = await spawnedP;
+  assert.equal(spawned.event, "update");
+
+  const removedP = waitForListUpdate(ws, (terminals) => terminals.every((item) => item.id !== extra.id));
+  removeTerminal(extra.id);
+  const removed = await removedP;
+  assert.equal(removed.event, "update");
+});
+
 test("terminal WebSocket does not wait on a stuck HMR upgrade", async (t) => {
   const hanging: Duplex[] = [];
   const server = createServer((req, res) => {
@@ -186,7 +250,7 @@ test("SSE endpoints are not the live path for session watch or terminal", async 
     });
   });
 
-  for (const path of ["/api/sessions/watch?id=session-watch-test", "/api/terminal/stream?id=term1"]) {
+  for (const path of ["/api/sessions/watch?id=session-watch-test", "/api/terminal/stream?id=term1", "/api/terminal/list"]) {
     const res = await fetch(`http://127.0.0.1:${port}${path}`, {
       headers: { Accept: "text/event-stream" },
     });
@@ -199,6 +263,7 @@ test("SSE endpoints are not the live path for session watch or terminal", async 
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
   assert.equal(existsSync(join(root, "src/app/api/sessions/watch/route.ts")), false);
   assert.equal(existsSync(join(root, "src/app/api/terminal/stream/route.ts")), false);
+  assert.equal(existsSync(join(root, "src/app/api/terminal/list/route.ts")), false);
 });
 
 test("Token auth gates live WebSockets", async (t) => {

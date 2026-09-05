@@ -150,6 +150,7 @@ All endpoints require a valid token (cookie or `Bearer` header).
 | `/api/sessions/history` | `GET` | Full transcript for a session. `?id=<sessionId>&workspace=<path>` |
 | `/api/sessions/watch` | WebSocket | Live Session updates. `id=<sessionId>&workspace=<path>` |
 | `/api/terminal/stream` | WebSocket | In-Host terminal, both ways. `id=<terminalId>` |
+| `/api/terminal/list` | WebSocket | Live terminal roster (spawn, exit, remove) |
 | `/api/projects` | `GET` | List all discovered Cursor projects |
 | `/api/git` | `GET` | Git status, diffs, and branches. `?workspace=<path>&detail=status\|diff\|branches` |
 | `/api/git` | `POST` | Git actions. Body: `{ action, workspace?, message?, files?, branch? }` |

@@ -7,16 +7,9 @@ import type { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { apiFetch } from "@/lib/api-fetch";
 import { liveWebSocketUrl } from "@/lib/live-ws-url";
+import type { TerminalInfo } from "@/lib/types";
 import { useHaptics } from "@/hooks/use-haptics";
 import { CloseIcon, PlusIcon, Spinner, StopIcon, TrashIcon } from "./icons";
-
-interface TerminalInfo {
-  id: string;
-  cwd: string;
-  running: boolean;
-  exitCode: number | null;
-  startedAt: number;
-}
 
 interface TerminalTab {
   id: string;
@@ -29,7 +22,6 @@ interface TerminalPanelProps {
   open: boolean;
   onClose: () => void;
   workspace?: string;
-  onCountChange?: (count: number) => void;
 }
 
 interface XtermEntry {
@@ -51,12 +43,11 @@ function cwdLabel(cwd: string): string {
   return cwd.split("/").filter(Boolean).pop() || "~";
 }
 
-export function TerminalPanel({ open, onClose, workspace, onCountChange }: TerminalPanelProps) {
+export function TerminalPanel({ open, onClose, workspace }: TerminalPanelProps) {
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [spawning, setSpawning] = useState(false);
-  const [debugLine, setDebugLine] = useState("terminal: idle");
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
   const pendingStdinRef = useRef<Map<string, string[]>>(new Map());
   const pendingOutputRef = useRef<Map<string, string[]>>(new Map());
@@ -70,8 +61,6 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
   const fitCtorRef = useRef<typeof FitAddon | null>(null);
   const linksCtorRef = useRef<typeof WebLinksAddon | null>(null);
   const [xtermReady, setXtermReady] = useState(false);
-
-  useEffect(() => { onCountChange?.(tabs.length); }, [tabs.length, onCountChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,7 +145,6 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
     };
 
     ws.addEventListener("open", () => {
-      setDebugLine(`ws OPEN id=${id}`);
       console.log("[terminal:ws] open", id, ws.readyState);
       const queued = pendingStdinRef.current.get(id) ?? [];
       pendingStdinRef.current.delete(id);
@@ -183,7 +171,6 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
 
       switch (rec.event) {
         case "connected":
-          setDebugLine(`ws connected id=${id} output=${data.output?.length ?? 0}B running=${String(data.running)}`);
           console.log("[terminal:recv] connected", id, { running: data.running, outputBytes: data.output?.length ?? 0 });
           if (data.output) writeOutput(data.output);
           setTabs((prev) =>
@@ -191,7 +178,6 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
           );
           return;
         case "output":
-          setDebugLine(`ws recv output ${data.data?.length ?? 0}B`);
           console.log("[terminal:recv] output", id, JSON.stringify(data.data ?? "").slice(0, 120));
           if (data.data) writeOutput(data.data);
           setTabs((prev) =>
@@ -206,13 +192,11 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
     });
 
     ws.addEventListener("error", () => {
-      setDebugLine(`ws ERROR id=${id}`);
       console.error("[terminal] WebSocket error", id);
     });
 
     ws.addEventListener("close", (ev) => {
       socketsRef.current.delete(id);
-      setDebugLine(`ws CLOSE id=${id} code=${ev.code} ${ev.reason}`);
       console.log("[terminal:ws] close", id, ev.code, ev.reason);
     });
   }, [getOrCreateXterm]);
@@ -357,13 +341,11 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
     });
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "input", data }));
-      setDebugLine(`sent ${data.length}B to ${id} (ws OPEN)`);
       return;
     }
     const queued = pendingStdinRef.current.get(id) ?? [];
     queued.push(data);
     pendingStdinRef.current.set(id, queued);
-    setDebugLine(`queued ${data.length}B to ${id} readyState=${ws?.readyState ?? "none"}`);
     if (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) {
       connectStream(id);
     }
@@ -378,12 +360,10 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
   const handleSubmit = useCallback(() => {
     if (!current || !isRunning) {
       console.log("[terminal:send] blocked", { hasTab: Boolean(current), isRunning, activeTab });
-      setDebugLine(`send blocked running=${String(isRunning)} tab=${activeTab ?? "none"}`);
       return;
     }
     if (!input) {
       console.log("[terminal:send] empty input");
-      setDebugLine("send blocked: empty input");
       return;
     }
     handleSendStdin(input);
@@ -448,9 +428,6 @@ export function TerminalPanel({ open, onClose, workspace, onCountChange }: Termi
           </div>
         </div>
 
-        <div className="px-3 py-1 border-b border-border text-[10px] font-mono text-text-muted truncate" title={debugLine}>
-          {debugLine}
-        </div>
         {tabs.length > 0 && (
           <div className="shrink-0 flex items-center gap-0.5 px-2 py-1 border-b border-border overflow-x-auto">
             {tabs.map((t, i) => (

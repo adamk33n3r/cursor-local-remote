@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "child_process";
 import { randomUUID } from "crypto";
+import type { TerminalInfo } from "@/lib/types";
 
 const MAX_OUTPUT_BYTES = 512 * 1024;
 
@@ -16,9 +17,15 @@ interface TerminalProcess {
 
 declare global {
   var __terminalRegistry: Map<string, TerminalProcess> | undefined; // eslint-disable-line no-var
+  var __terminalListListeners: Set<() => void> | undefined; // eslint-disable-line no-var
 }
 
 const terminals = globalThis.__terminalRegistry ?? (globalThis.__terminalRegistry = new Map<string, TerminalProcess>());
+const listListeners = globalThis.__terminalListListeners ?? (globalThis.__terminalListListeners = new Set<() => void>());
+
+function notifyList(): void {
+  for (const cb of listListeners) cb();
+}
 
 const ENV_BLOCKLIST = new Set(["PORT", "AUTH_TOKEN"]);
 const ENV_PREFIX_BLOCKLIST = ["__NEXT_", "NEXT_"];
@@ -81,15 +88,18 @@ export function spawnTerminal(cwd: string): TerminalProcess {
     entry.running = false;
     entry.exitCode = code;
     for (const cb of entry.listeners) cb();
+    notifyList();
   });
 
   child.on("error", (err) => {
     entry.running = false;
     entry.output += `\n[error] ${err.message}\n`;
     for (const cb of entry.listeners) cb();
+    notifyList();
   });
 
   terminals.set(id, entry);
+  notifyList();
   return entry;
 }
 
@@ -97,7 +107,7 @@ export function getTerminal(id: string): TerminalProcess | undefined {
   return terminals.get(id);
 }
 
-export function listTerminals(): { id: string; cwd: string; running: boolean; exitCode: number | null; startedAt: number }[] {
+export function listTerminals(): TerminalInfo[] {
   return Array.from(terminals.values()).map((t) => ({
     id: t.id,
     cwd: t.cwd,
@@ -105,6 +115,11 @@ export function listTerminals(): { id: string; cwd: string; running: boolean; ex
     exitCode: t.exitCode,
     startedAt: t.startedAt,
   }));
+}
+
+export function onTerminalListChange(cb: () => void): () => void {
+  listListeners.add(cb);
+  return () => { listListeners.delete(cb); };
 }
 
 function killProcessGroup(pid: number, signal: NodeJS.Signals): boolean {
@@ -146,6 +161,7 @@ export function removeTerminal(id: string): boolean {
   if (!entry) return false;
   if (entry.running) killTerminal(id);
   terminals.delete(id);
+  notifyList();
   return true;
 }
 

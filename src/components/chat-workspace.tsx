@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useHaptics } from "@/hooks/use-haptics";
 import { fetchActiveSessions } from "@/hooks/use-chat";
+import { useTerminalList } from "@/hooks/use-terminal-list";
 import { apiFetch } from "@/lib/api-fetch";
 import { vlog } from "@/lib/verbose";
 import { ChatContainer } from "./chat-container";
@@ -197,26 +198,14 @@ export function ChatWorkspace() {
     });
   }, [activeId]);
 
-  const [workspaceTerminals, setWorkspaceTerminals] = useState<Record<string, number>>({});
-
-  useEffect(() => {
-    const fetchCounts = () => {
-      apiFetch("/api/terminal")
-        .then((r) => r.json())
-        .then((data) => {
-          const all: { cwd: string; running: boolean }[] = data.terminals || [];
-          const counts: Record<string, number> = {};
-          for (const t of all) {
-            if (t.running) counts[t.cwd] = (counts[t.cwd] || 0) + 1;
-          }
-          setWorkspaceTerminals(counts);
-        })
-        .catch(() => {});
-    };
-    fetchCounts();
-    const id = setInterval(fetchCounts, 10_000);
-    return () => clearInterval(id);
-  }, []);
+  const terminals = useTerminalList();
+  const workspaceTerminals = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const t of terminals) {
+      if (t.running) counts[t.cwd] = (counts[t.cwd] || 0) + 1;
+    }
+    return counts;
+  }, [terminals]);
 
   const currentSessionId = instances.find((i) => i.id === activeId)?.sessionId ?? null;
 
