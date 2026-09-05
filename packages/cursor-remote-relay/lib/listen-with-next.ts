@@ -1,18 +1,28 @@
 import { createServer } from "node:http";
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "node:url";
 import next from "next";
 import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies } from "./login.mjs";
+import { listHosts } from "./hosts";
+import { hostsPageHtml } from "./hosts-page";
+import { attachTunnel, proxyHostHttp } from "./tunnel";
+import type { UpgradeHandler } from "./tunnel";
 
 const relayRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+type NextWithUpgrade = ReturnType<typeof next> & {
+  didWebSocketSetup?: boolean;
+  upgradeHandler?: UpgradeHandler;
+};
 
 /**
  * Login gate in Node. Next Edge middleware inlines env at build, so CLI
  * credentials would be missing there. True means the response is already sent.
  */
-async function gate(req, res) {
+async function gate(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const login = loginFromEnv();
   if (!login) {
     res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
@@ -43,7 +53,10 @@ async function gate(req, res) {
   }
   if (
     !authed &&
-    (pathname === "/hosts" || pathname === "/api/hosts" || pathname.startsWith("/api/hosts/"))
+    (pathname === "/hosts" ||
+      pathname === "/api/hosts" ||
+      pathname.startsWith("/api/hosts/") ||
+      pathname.startsWith("/h/"))
   ) {
     if (pathname.startsWith("/api/")) {
       res.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
@@ -54,41 +67,71 @@ async function gate(req, res) {
     res.end();
     return true;
   }
+  if (authed && method === "GET" && pathname === "/api/hosts") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ hosts: listHosts() }));
+    return true;
+  }
+  if (authed && method === "GET" && pathname === "/hosts") {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(hostsPageHtml());
+    return true;
+  }
   return false;
 }
 
-/**
- * @param {number} port
- * @param {string} bind
- */
-export async function listenWithNext(port, bind) {
+export async function listenWithNext(port: number, bind: string): Promise<Server> {
   const isBuilt = existsSync(join(relayRoot, ".next", "BUILD_ID"));
   if (isBuilt && !process.env.NODE_ENV) {
-    process.env.NODE_ENV = "production";
+    Reflect.set(process.env, "NODE_ENV", "production");
   }
   const app = next({
     dev: !isBuilt,
     hostname: bind,
     port,
     dir: relayRoot,
-  });
+  }) as NextWithUpgrade;
+  app.didWebSocketSetup = true;
   await app.prepare();
+  app.didWebSocketSetup = true;
   const handle = app.getRequestHandler();
+  const nextUpgrade = app.upgradeHandler;
   const server = createServer((req, res) => {
     void gate(req, res)
-      .then((handled) => {
+      .then(async (handled) => {
         if (handled) return;
+        if (await proxyHostHttp(req, res)) return;
         const parsed = parse(req.url ?? "/", true);
         void handle(req, res, parsed);
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (res.headersSent) return;
         const message = err instanceof Error ? err.message : String(err);
         res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
         res.end(message);
       });
   });
-  await new Promise((resolve, reject) => {
+  attachTunnel(server, nextUpgrade);
+  const rawOn = server.on.bind(server);
+  const rawAddListener = server.addListener.bind(server);
+  const rawPrepend = server.prependListener.bind(server);
+  const ignoreForeignUpgrade = (
+    original: typeof server.on,
+    event: string | symbol,
+    listener: (...args: unknown[]) => void,
+  ): Server => {
+    if (event === "upgrade") return server;
+    return original.call(server, event, listener);
+  };
+  server.on = ((event: string | symbol, listener: (...args: unknown[]) => void) =>
+    ignoreForeignUpgrade(rawOn, event, listener)) as typeof server.on;
+  server.addListener = ((event: string | symbol, listener: (...args: unknown[]) => void) =>
+    ignoreForeignUpgrade(rawAddListener, event, listener)) as typeof server.addListener;
+  server.prependListener = ((event: string | symbol, listener: (...args: unknown[]) => void) => {
+    if (event === "upgrade") return server;
+    return rawPrepend.call(server, event, listener);
+  }) as typeof server.prependListener;
+  await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, bind, () => resolve());
   });

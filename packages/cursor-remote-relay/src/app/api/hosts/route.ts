@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { listHosts } from "../../../../lib/hosts";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export function GET() {
-  // Registration is a later ticket; v1 Login still shows this empty list.
-  return NextResponse.json({ hosts: [] });
+  return NextResponse.json({ hosts: listHosts() });
 }

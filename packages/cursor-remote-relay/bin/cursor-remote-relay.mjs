@@ -5,7 +5,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getLanIp } from "../lib/lan-ip.mjs";
-import { listenWithNext } from "../lib/listen-with-next.mjs";
+import { register } from "tsx/esm/api";
+
+// Node cannot load TypeScript until tsx is registered. ESM static imports are
+// hoisted, so listenWithNext stays as a top-level dynamic import.
+register();
+const { listenWithNext } = await import("../lib/listen-with-next.ts");
 
 const DEFAULT_PORT = 3200;
 const DEFAULT_BIND = "0.0.0.0";

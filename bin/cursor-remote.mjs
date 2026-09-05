@@ -3,6 +3,7 @@
 import { spawn, execFileSync } from "child_process";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { hostname as osHostname } from "os";
 import { getLanIp } from "../src/lib/lan-ip.mjs";
 import { existsSync, readFileSync } from "fs";
 import { randomInt } from "crypto";
@@ -12,6 +13,14 @@ import qrcode from "qrcode-terminal";
 import { mergeKnownWorkspaces } from "../src/lib/merge-known-workspaces.mjs";
 import { listSessionStoreWorkspaces } from "../src/lib/list-session-workspaces.mjs";
 import { listCursorCacheWorkspaces } from "../src/lib/cursor-project-cache.mjs";
+import { register } from "tsx/esm/api";
+
+// Node cannot load TypeScript until tsx is registered. ESM static imports are
+// hoisted, so Host identity/lock/tunnel stay as top-level dynamic imports.
+register();
+const { hostStateDir, loadOrCreateHostId } = await import("../src/lib/host-identity.ts");
+const { clearHostLock, findExistingHost, writeHostLock } = await import("../src/lib/host-lock.ts");
+const { connectHostTunnel } = await import("../src/lib/tunnel-client.ts");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
@@ -146,6 +155,9 @@ if (args.includes("--help") || args.includes("-h")) {
     -p, --port     Port to run on (default: 3100)
     -t, --token    Set auth Token (otherwise random or AUTH_TOKEN env)
     --host         Bind to specific host/IP (default: 0.0.0.0)
+    --relay        Relay URL to register with (or RELAY_URL / --config)
+    --name         Display name on the Host list (default: hostname)
+    --config       JSON file with optional relay and name
     --no-open      Don't auto-open the browser
     --no-qr        Don't show QR code in terminal
     --no-trust     Disable Workspace trust (Agent will ask before actions)
@@ -163,6 +175,8 @@ if (args.includes("--help") || args.includes("-h")) {
     cursor-remote ~/code/my-app            # Start for a specific Workspace
     cursor-remote . --port 8080            # Use a different port
     cursor-remote --token my-secret        # Use a fixed Token
+    cursor-remote --relay http://192.168.1.10:3200
+    cursor-remote --name Study --relay http://192.168.1.10:3200
     cursor-remote --host 127.0.0.1         # Bind to localhost only
     cursor-remote --no-trust               # Require Agent to ask before actions
     cursor-remote --status                 # Check for running Host instances
@@ -179,6 +193,9 @@ let verbose = false;
 let trust = process.env.CURSOR_TRUST !== "0";
 let customToken = null;
 let hostname = "0.0.0.0";
+let relayUrl = process.env.RELAY_URL || "";
+let displayName = "";
+let hostConfigPath = null;
 
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
@@ -188,6 +205,12 @@ for (let i = 0; i < args.length; i++) {
     customToken = args[++i] || null;
   } else if (a === "--host") {
     hostname = args[++i] || hostname;
+  } else if (a === "--relay") {
+    relayUrl = args[++i] || relayUrl;
+  } else if (a === "--name") {
+    displayName = args[++i] || displayName;
+  } else if (a === "--config") {
+    hostConfigPath = args[++i] || hostConfigPath;
   } else if (a === "--no-open") {
     noOpen = true;
   } else if (a === "--no-qr") {
@@ -203,6 +226,21 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 
+if (hostConfigPath) {
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(hostConfigPath, "utf8"));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`  Error: cannot read config ${hostConfigPath}: ${message}`);
+    process.exit(1);
+  }
+  if (!relayUrl && typeof raw.relay === "string") relayUrl = raw.relay;
+  if (!displayName && typeof raw.name === "string") displayName = raw.name;
+}
+relayUrl = relayUrl.trim();
+displayName = (displayName || osHostname()).trim();
+
 const portNum = parseInt(rawPort, 10);
 if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
   console.error(`  Error: invalid port: ${rawPort}`);
@@ -212,6 +250,13 @@ const workspace = positional[0] ? resolve(positional[0]) : process.cwd();
 
 if (!existsSync(workspace)) {
   console.error(`  Error: workspace path does not exist: ${workspace}`);
+  process.exit(1);
+}
+
+const stateDir = hostStateDir();
+const existingHost = await findExistingHost(stateDir);
+if (existingHost) {
+  console.error(`  A Host is already running at ${existingHost.url}`);
   process.exit(1);
 }
 
@@ -232,6 +277,13 @@ async function findAvailablePort(startPort) {
     const candidate = startPort + i;
     if (candidate > 65535) break;
     if (await isPortAvailable(candidate)) return candidate;
+    if (i === 0) {
+      const probed = await probeHost(candidate);
+      if (probed) {
+        console.error(`  A Host is already running at ${probed.url}`);
+        process.exit(1);
+      }
+    }
   }
   return null;
 }
@@ -245,6 +297,13 @@ if (availablePort !== portNum) {
   console.log(`  \x1b[33mPort ${portNum} in use, using ${availablePort}\x1b[0m`);
 }
 const port = String(availablePort);
+
+const hostId = loadOrCreateHostId(stateDir);
+writeHostLock(stateDir, {
+  pid: process.pid,
+  port: availablePort,
+  url: `http://localhost:${port}`,
+});
 
 const lanIp = await getLanIp();
 const isLocalOnly = hostname === "127.0.0.1" || hostname === "localhost";
@@ -316,14 +375,34 @@ const child = spawn(process.execPath, [resolve(projectRoot, "bin/host-http.mjs")
 });
 
 let ready = false;
+/** @type {{ close: () => Promise<void> } | null} */
+let tunnel = null;
+
+if (relayUrl) {
+  void connectHostTunnel({
+    relayUrl,
+    localOrigin: `http://127.0.0.1:${port}`,
+    id: hostId,
+    name: displayName,
+    authToken,
+  })
+    .then((t) => {
+      tunnel = t;
+    })
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`  Error: Relay Registration failed: ${message}`);
+    });
+}
+
 child.stdout.on("data", (data) => {
   const text = data.toString();
   if (verbose) {
     process.stdout.write("  \x1b[2m[next]\x1b[0m " + text);
   }
   if (!ready && (text.includes("Ready") || text.includes("ready"))) {
-    console.log("  \x1b[32m✓ Ready\x1b[0m");
     ready = true;
+    console.log("  \x1b[32m✓ Ready\x1b[0m");
     openBrowser();
   }
 });
@@ -339,6 +418,7 @@ child.stderr.on("data", (data) => {
 });
 
 child.on("close", (code) => {
+  clearHostLock(stateDir);
   process.exit(code ?? 0);
 });
 
@@ -349,8 +429,12 @@ function shutdown(signal) {
     process.exit(1);
   }
   exiting = true;
-  child.kill(signal);
-  setTimeout(() => process.exit(0), 3000);
+  clearHostLock(stateDir);
+  const stopTunnel = tunnel ? tunnel.close() : Promise.resolve();
+  void stopTunnel.finally(() => {
+    child.kill(signal);
+    setTimeout(() => process.exit(0), 3000);
+  });
 }
 
 process.on("SIGINT", () => shutdown("SIGTERM"));
