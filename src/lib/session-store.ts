@@ -134,8 +134,10 @@ export async function upsertSession(
 export async function listSessions(workspace?: string, includeArchived = false): Promise<StoredSession[]> {
   const conn = await getDb();
   const archivedFilter = includeArchived ? " archived = 1" : " archived = 0";
+  const workspaceMatch =
+    process.platform === "win32" ? "lower(workspace) = lower(?)" : "workspace = ?";
   const rows = workspace
-    ? queryAll(conn, "SELECT * FROM sessions WHERE workspace = ? AND" + archivedFilter + " ORDER BY updated_at DESC", [workspace])
+    ? queryAll(conn, "SELECT * FROM sessions WHERE " + workspaceMatch + " AND" + archivedFilter + " ORDER BY updated_at DESC", [workspace])
     : queryAll(conn, "SELECT * FROM sessions WHERE" + archivedFilter + " ORDER BY updated_at DESC");
   return rows.map(rowToSession);
 }
@@ -176,7 +178,9 @@ export async function archiveAllSessions(workspace?: string, extraSessions?: Sto
     }
   }
   if (workspace) {
-    conn.run("UPDATE sessions SET archived = 1 WHERE workspace = ? AND archived = 0", [workspace]);
+    const workspaceMatch =
+      process.platform === "win32" ? "lower(workspace) = lower(?)" : "workspace = ?";
+    conn.run("UPDATE sessions SET archived = 1 WHERE " + workspaceMatch + " AND archived = 0", [workspace]);
   } else {
     conn.run("UPDATE sessions SET archived = 1 WHERE archived = 0");
   }

@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 
 import { spawn, execFileSync } from "child_process";
-import { resolve, dirname, join, sep } from "path";
+import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { homedir } from "os";
 import { getLanIp } from "../src/lib/lan-ip.mjs";
-import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { randomInt } from "crypto";
 import { createServer } from "net";
 import http from "http";
 import qrcode from "qrcode-terminal";
 import { mergeKnownWorkspaces } from "../src/lib/merge-known-workspaces.mjs";
 import { listSessionStoreWorkspaces } from "../src/lib/list-session-workspaces.mjs";
+import { listCursorCacheWorkspaces } from "../src/lib/cursor-project-cache.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
@@ -67,40 +67,6 @@ function probeHost(port) {
     req.on("error", () => resolve(null));
     req.on("timeout", () => { req.destroy(); resolve(null); });
   });
-}
-
-function projectKeyToWorkspace(key) {
-  const parts = key.split("-");
-  let path = sep + parts[0];
-  for (let i = 1; i < parts.length; i++) {
-    const withSlash = path + sep + parts[i];
-    if (existsSync(withSlash) && statSync(withSlash).isDirectory()) {
-      path = withSlash;
-    } else {
-      path = path + "-" + parts[i];
-    }
-  }
-  return existsSync(path) ? path : null;
-}
-
-function listCursorCacheWorkspaces() {
-  const cursorDir = join(homedir(), ".cursor", "projects");
-  const workspaces = [];
-  try {
-    const entries = readdirSync(cursorDir);
-    for (const entry of entries) {
-      if (!/^[A-Z]/.test(entry)) continue;
-      const transcripts = join(cursorDir, entry, "agent-transcripts");
-      if (!existsSync(transcripts)) continue;
-      const ws = projectKeyToWorkspace(entry);
-      if (!ws) continue;
-      const name = ws.split(sep).pop() || ws;
-      workspaces.push({ name, path: ws, key: entry });
-    }
-  } catch {
-    // Cursor projects cache is missing
-  }
-  return workspaces.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 const args = process.argv.slice(2);

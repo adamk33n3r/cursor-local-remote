@@ -5,6 +5,7 @@ import type { StoredSession, WorkspaceInfo } from "@/lib/types";
 import { useHaptics } from "@/hooks/use-haptics";
 import { apiFetch } from "@/lib/api-fetch";
 import { timeAgo } from "@/lib/format";
+import { sameWorkspacePath, workspacePathIdentity } from "@/lib/merge-known-workspaces.mjs";
 import { RefreshIcon, CloseIcon, PlusIcon, Spinner, TrashIcon, ChevronDown } from "./icons";
 
 interface SessionSidebarProps {
@@ -161,6 +162,7 @@ export function SessionSidebar({
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [pathInsensitive, setPathInsensitive] = useState(false);
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const [starred, setStarred] = useState<string[]>([]);
   const haptics = useHaptics();
@@ -193,18 +195,30 @@ export function SessionSidebar({
   const toggleStar = useCallback((e: React.MouseEvent, path: string) => {
     e.stopPropagation();
     setStarred((prev) => {
-      const next = prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path];
+      const already = prev.some((p) => sameWorkspacePath(p, path, pathInsensitive));
+      const next = already
+        ? prev.filter((p) => !sameWorkspacePath(p, path, pathInsensitive))
+        : [...prev, path];
       saveStarred(next);
       return next;
     });
-  }, []);
+  }, [pathInsensitive]);
 
   const fetchProjects = useCallback(() => {
     apiFetch("/api/projects")
       .then((r) => r.json())
       .then((data) => {
-        setWorkspaces(data.workspaces || data.projects || []);
-        if (!selectedProject && data.currentWorkspace) {
+        const list: WorkspaceInfo[] = data.workspaces || data.projects || [];
+        const insensitive = Boolean(data.pathInsensitive);
+        setWorkspaces(list);
+        setPathInsensitive(insensitive);
+        if (selectedProject && selectedProject !== "__all__") {
+          const match = list.find((w) => sameWorkspacePath(w.path, selectedProject, insensitive));
+          if (match && match.path !== selectedProject) {
+            setSelectedProject(match.path);
+            localStorage.setItem(PROJECT_STORAGE_KEY, match.path);
+          }
+        } else if (!selectedProject && data.currentWorkspace) {
           setSelectedProject(data.currentWorkspace);
           localStorage.setItem(PROJECT_STORAGE_KEY, data.currentWorkspace);
         }
@@ -302,9 +316,23 @@ export function SessionSidebar({
 
   const currentWorkspaceName = selectedProject === "__all__"
     ? "All workspaces"
-    : workspaces.find((w) => w.path === selectedProject)?.name
-      || selectedProject?.split("/").pop()
+    : workspaces.find((w) => sameWorkspacePath(w.path, selectedProject ?? "", pathInsensitive))?.name
+      || selectedProject?.split(/[/\\]/).pop()
       || "Current workspace";
+
+  const starredPaths = (() => {
+    const seen = new Set<string>();
+    const paths: string[] = [];
+    for (const path of starred) {
+      const match = workspaces.find((w) => sameWorkspacePath(w.path, path, pathInsensitive));
+      const canon = match?.path ?? path;
+      const id = workspacePathIdentity(canon, pathInsensitive);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      paths.push(canon);
+    }
+    return paths;
+  })();
 
   return (
     <>
@@ -355,12 +383,12 @@ export function SessionSidebar({
             New session
           </button>
 
-          {starred.length > 0 && (
+          {starredPaths.length > 0 && (
             <div className="space-y-px">
-              {starred.map((path) => {
-                const proj = workspaces.find((w) => w.path === path);
-                const name = proj?.name || path.split("/").pop() || path;
-                const isActive = selectedProject === path;
+              {starredPaths.map((path) => {
+                const proj = workspaces.find((w) => sameWorkspacePath(w.path, path, pathInsensitive));
+                const name = proj?.name || path.split(/[/\\]/).pop() || path;
+                const isActive = sameWorkspacePath(selectedProject ?? "", path, pathInsensitive);
                 const termCount = workspaceTerminals[path] || 0;
                 return (
                   <button
@@ -411,12 +439,14 @@ export function SessionSidebar({
                   <div className="h-px bg-border mx-2 my-1" />
                   {workspaces.map((p) => {
                     const termCount = workspaceTerminals[p.path] || 0;
+                    const isStarred = starred.some((s) => sameWorkspacePath(s, p.path, pathInsensitive));
                     return (
                       <button
                         key={p.key}
                         onClick={() => handleProjectSelect(p.path)}
                         className={`w-full text-left px-3 py-1.5 text-[12px] transition-colors flex items-center gap-2 ${
-                          selectedProject === p.path
+                          selectedProject !== "__all__" &&
+                          sameWorkspacePath(selectedProject ?? "", p.path, pathInsensitive)
                             ? "text-text bg-bg-active"
                             : "text-text-secondary hover:bg-bg-hover hover:text-text"
                         }`}
@@ -433,12 +463,12 @@ export function SessionSidebar({
                         <span
                           onClick={(e) => toggleStar(e, p.path)}
                           className={`shrink-0 p-0.5 rounded hover:bg-bg-active transition-colors ${
-                            starred.includes(p.path) ? "text-text-secondary" : "text-text-muted/30 hover:text-text-muted"
+                            isStarred ? "text-text-secondary" : "text-text-muted/30 hover:text-text-muted"
                           }`}
                           role="button"
-                          aria-label={starred.includes(p.path) ? "Unstar workspace" : "Star workspace"}
+                          aria-label={isStarred ? "Unstar workspace" : "Star workspace"}
                         >
-                          <StarIcon size={12} filled={starred.includes(p.path)} />
+                          <StarIcon size={12} filled={isStarred} />
                         </span>
                       </button>
                     );

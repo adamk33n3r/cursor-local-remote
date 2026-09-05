@@ -11,6 +11,7 @@ test("known Workspace list is the stock merge of cache, session store, and Start
     fromCursorCache: cache,
     fromSessionStore: ["/ws/beta", "/ws/from-sessions"],
     startDirectory: "/ws/start",
+    caseInsensitive: false,
   });
 
   assert.equal(currentWorkspace, "/ws/start");
@@ -31,9 +32,43 @@ test("Workspace list payload uses workspaces, not a Project type", () => {
     fromCursorCache: [],
     fromSessionStore: [],
     startDirectory: "/start",
+    caseInsensitive: false,
   });
   assert.ok("workspaces" in payload);
   assert.equal("projects" in payload, false);
   assert.equal(payload.workspaces.length, 1);
   assert.deepEqual(Object.keys(payload.workspaces[0]).sort(), ["key", "name", "path"]);
+});
+
+test("Windows merge folds the whole path, not just the drive letter", () => {
+  const payload = mergeKnownWorkspaces({
+    fromCursorCache: [
+      {
+        name: "cursor-local-remote",
+        path: "d:\\dev\\cursor-local-remote",
+        key: "d-dev-cursor-local-remote",
+      },
+    ],
+    fromSessionStore: ["D:\\dev\\Cursor-Local-Remote"],
+    startDirectory: "D:\\dev\\cursor-local-remote",
+    caseInsensitive: true,
+  });
+
+  assert.equal(payload.workspaces.length, 1);
+  assert.equal(payload.pathInsensitive, true);
+  assert.equal(payload.currentWorkspace, "D:\\dev\\cursor-local-remote");
+  assert.equal(payload.workspaces[0].path, "D:\\dev\\cursor-local-remote");
+  assert.equal(payload.workspaces[0].key, "d-dev-cursor-local-remote");
+});
+
+test("case-sensitive hosts keep paths that differ only by case", () => {
+  const payload = mergeKnownWorkspaces({
+    fromCursorCache: [{ name: "App", path: "/ws/App", key: "ws-App" }],
+    fromSessionStore: [],
+    startDirectory: "/ws/app",
+    caseInsensitive: false,
+  });
+
+  assert.equal(payload.pathInsensitive, false);
+  assert.equal(payload.workspaces.length, 2);
 });

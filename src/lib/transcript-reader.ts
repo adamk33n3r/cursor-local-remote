@@ -1,15 +1,14 @@
 import { readdir, stat, readFile, access } from "fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "path";
+import { isAbsolute, join, relative, resolve } from "path";
 import { homedir } from "os";
-import { existsSync, statSync } from "fs";
-import type { StoredSession, ChatMessage, ToolCallInfo, TodoItem, WorkspaceInfo } from "@/lib/types";
+import type { StoredSession, ChatMessage, ToolCallInfo, TodoItem } from "@/lib/types";
 import { displayTranscriptText } from "@/lib/transcript-text";
 import { vlog } from "@/lib/verbose";
 
 const CURSOR_PROJECTS_DIR = join(homedir(), ".cursor", "projects");
 
 /** Cursor stores transcripts under ~/.cursor/projects/<key>/ where key is the
- * absolute workspace with separators turned into hyphens (`D:\dev\foo` → `D-dev-foo`). */
+ * absolute workspace with separators turned into hyphens (`D:\dev\foo` → `d-dev-foo`). */
 export function workspaceToProjectKey(workspace: string): string {
   return resolve(workspace)
     .replace(/\\/g, "/")
@@ -30,43 +29,7 @@ export function isPathInside(parent: string, child: string): boolean {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
-function projectKeyToWorkspace(key: string): string | null {
-  const parts = key.split("-");
-  let path = sep + parts[0];
-  for (let i = 1; i < parts.length; i++) {
-    const withSlash = path + sep + parts[i];
-    if (existsSync(withSlash) && statSync(withSlash).isDirectory()) {
-      path = withSlash;
-    } else {
-      path = path + "-" + parts[i];
-    }
-  }
-  if (!existsSync(path)) return null;
-  return path;
-}
-
-export async function listCursorCacheWorkspaces(): Promise<WorkspaceInfo[]> {
-  const workspaces: WorkspaceInfo[] = [];
-  try {
-    const entries = await readdir(CURSOR_PROJECTS_DIR);
-    for (const entry of entries) {
-      if (!/^[A-Z]/.test(entry)) continue;
-      const transcriptsDir = join(CURSOR_PROJECTS_DIR, entry, "agent-transcripts");
-      try {
-        await access(transcriptsDir);
-      } catch {
-        continue;
-      }
-      const workspace = projectKeyToWorkspace(entry);
-      if (!workspace) continue;
-      const name = workspace.split(sep).pop() || workspace;
-      workspaces.push({ name, path: workspace, key: entry });
-    }
-  } catch {
-    // Cursor projects cache is missing or unreadable
-  }
-  return workspaces.sort((a, b) => a.name.localeCompare(b.name));
-}
+export { listCursorCacheWorkspaces, projectKeyToWorkspace } from "@/lib/cursor-project-cache.mjs";
 
 async function findTranscriptsDir(workspace: string): Promise<string | null> {
   const keys = workspaceToProjectKeyCandidates(workspace);

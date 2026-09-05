@@ -41,7 +41,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node --test test/agent-spawn.test.mjs test/host-cli.test.mjs test/relay-package.test.mjs test/workspace-list.test.mjs && tsx --test --test-concurrency=1 --test-reporter=spec test/live-streams.test.ts test/agent-bin.test.ts test/lan-ip.test.ts test/project-key.test.ts test/transcript-fold.test.ts",
+    "test": "node --test test/agent-spawn.test.mjs test/host-cli.test.mjs test/relay-package.test.mjs test/workspace-list.test.mjs test/cursor-project-cache.test.mjs && tsx --test --test-concurrency=1 --test-reporter=spec test/live-streams.test.ts test/agent-bin.test.ts test/lan-ip.test.ts test/project-key.test.ts test/transcript-fold.test.ts",
     "prepublishOnly": "npm run build && find .next -name '*.map' -delete"
   },
   "dependencies": {
