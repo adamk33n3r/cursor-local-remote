@@ -41,10 +41,20 @@ cursor-remote --update
 
 Or the same command as install: `npm install -g @adamk33n3r/cursor-remote`
 
-Relay (stub, no Host Next.js tarball):
+Relay (separate install, no Host Next.js tarball):
 
 ```bash
 npm install -g @adamk33n3r/cursor-remote-relay
+cursor-remote-relay
+```
+
+Listens on `0.0.0.0:3200` by default (`-p` / `PORT` to override). Stdout prints localhost and LAN Host-list URLs. Set Login with `LOGIN_USERNAME` and `LOGIN_PASSWORD`, or `--config relay.json` (`{ "username", "password" }`). Until those are set, the process stays up and does not serve Login or the Host list.
+
+Same process in a container (publish the port, pass Login via env):
+
+```bash
+docker build -t cursor-remote-relay packages/cursor-remote-relay
+docker run --rm -p 3200:3200 -e LOGIN_USERNAME=user -e LOGIN_PASSWORD=secret cursor-remote-relay
 ```
 
 I'm actively using this myself on a daily basis, so bugs get noticed and fixed quickly.

@@ -1,0 +1,76 @@
+import { createSocket } from "node:dgram";
+import { networkInterfaces } from "node:os";
+
+const VIRTUAL_NIC_RE =
+  /virtualbox|vmware|vbox|hyper-v|vethernet|wsl|docker|loopback|bluetooth|pseudo|hamachi|zerotier|radmin|npcap|tap-windows|qemu|hyperv/i;
+
+/** Same LAN pick as the Host: skip virtual NICs, prefer the default-route address. */
+export function isLikelyVirtualNic(name) {
+  return VIRTUAL_NIC_RE.test(name);
+}
+
+function isIpv4(addr) {
+  return addr.family === "IPv4" || addr.family === 4;
+}
+
+function isUsableLan(addr) {
+  return isIpv4(addr) && !addr.internal && !addr.address.startsWith("169.254.");
+}
+
+function collectCandidates(nics) {
+  /** @type {{ name: string, address: string, virtual: boolean }[]} */
+  const out = [];
+  for (const [name, addrs] of Object.entries(nics)) {
+    if (!addrs) continue;
+    const virtual = isLikelyVirtualNic(name);
+    for (const addr of addrs) {
+      if (isUsableLan(addr)) out.push({ name, address: addr.address, virtual });
+    }
+  }
+  return out;
+}
+
+export function pickLanIpv4(nics, defaultRouteIp) {
+  const candidates = collectCandidates(nics);
+  if (defaultRouteIp) {
+    const match = candidates.find((c) => c.address === defaultRouteIp);
+    if (match) return match.address;
+  }
+  const real = candidates.find((c) => !c.virtual);
+  if (real) return real.address;
+  return candidates[0]?.address ?? null;
+}
+
+export function getDefaultRouteIpv4() {
+  return new Promise((resolve) => {
+    const socket = createSocket("udp4");
+    const finish = (ip) => {
+      try {
+        socket.close();
+      } catch {
+        /* already closed */
+      }
+      resolve(ip);
+    };
+    const timer = setTimeout(() => finish(null), 500);
+    socket.once("error", () => {
+      clearTimeout(timer);
+      finish(null);
+    });
+    socket.connect(53, "8.8.8.8", () => {
+      clearTimeout(timer);
+      try {
+        const ip = socket.address().address;
+        finish(typeof ip === "string" && ip !== "0.0.0.0" ? ip : null);
+      } catch {
+        finish(null);
+      }
+    });
+  });
+}
+
+export async function getLanIp() {
+  const nics = networkInterfaces();
+  const defaultRouteIp = await getDefaultRouteIpv4();
+  return pickLanIpv4(nics, defaultRouteIp);
+}
