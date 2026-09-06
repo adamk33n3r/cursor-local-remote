@@ -34,7 +34,7 @@
   "scripts": {
     "build": "next build",
     "prepublishOnly": "next build",
-    "test": "node --test ../../test/relay-package.test.mjs ../../test/relay-login.test.mjs && tsx --test ../../test/source-ip.test.ts ../../test/registration-tunnel.test.ts"
+    "test": "node --test ../../test/relay-package.test.mjs ../../test/relay-login.test.mjs && tsx --test ../../test/source-ip.test.ts ../../test/request-origin.test.ts ../../test/relay-shutdown.test.ts ../../test/registration-tunnel.test.ts"
   },
   "dependencies": {
     "next": "^15.5.12",

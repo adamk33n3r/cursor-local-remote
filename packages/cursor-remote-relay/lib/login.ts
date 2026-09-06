@@ -1,18 +1,20 @@
 export const LOGIN_COOKIE = "cr_login";
 export const COOKIE_MAX_AGE_S = 60 * 60 * 24 * 7;
 
-export function loginFromEnv() {
+export type LoginCredentials = { username: string; password: string };
+
+export function loginFromEnv(): LoginCredentials | null {
   const username = process.env.LOGIN_USERNAME ?? "";
   const password = process.env.LOGIN_PASSWORD ?? "";
   if (!username || !password) return null;
   return { username, password };
 }
 
-function toHex(bytes) {
+function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function fromHex(hex) {
+function fromHex(hex: string): Uint8Array | null {
   if (hex.length % 2 !== 0) return null;
   const out = new Uint8Array(hex.length / 2);
   for (let i = 0; i < out.length; i++) {
@@ -23,7 +25,7 @@ function fromHex(hex) {
   return out;
 }
 
-function timingSafeEqualBytes(a, b) {
+function timingSafeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let out = 0;
   for (let i = 0; i < a.length; i++) {
@@ -32,17 +34,17 @@ function timingSafeEqualBytes(a, b) {
   return out === 0;
 }
 
-async function sha256(value) {
+async function sha256(value: string): Promise<Uint8Array> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return new Uint8Array(buf);
 }
 
-export async function safeEqual(a, b) {
+export async function safeEqual(a: string, b: string): Promise<boolean> {
   const [left, right] = await Promise.all([sha256(a), sha256(b)]);
   return timingSafeEqualBytes(left, right);
 }
 
-export async function loginCookieValue(username, password) {
+export async function loginCookieValue(username: string, password: string): Promise<string> {
   // HMAC of the username, keyed by the password, so the cookie is not the Login
   // password and still validates after a Relay restart with the same credentials.
   const key = await crypto.subtle.importKey(
@@ -60,7 +62,10 @@ export async function loginCookieValue(username, password) {
   return toHex(new Uint8Array(sig));
 }
 
-export async function isAuthedCookie(cookie, login) {
+export async function isAuthedCookie(
+  cookie: string | undefined,
+  login: LoginCredentials,
+): Promise<boolean> {
   if (!cookie) return false;
   const expected = fromHex(await loginCookieValue(login.username, login.password));
   const actual = fromHex(cookie);
@@ -68,10 +73,13 @@ export async function isAuthedCookie(cookie, login) {
   return timingSafeEqualBytes(expected, actual);
 }
 
-/**
- * @returns {{ httpOnly: true, sameSite: "strict", path: "/", maxAge: number, secure: false }}
- */
-export function cookieOptions() {
+export function cookieOptions(): {
+  httpOnly: true;
+  sameSite: "strict";
+  path: "/";
+  maxAge: number;
+  secure: false;
+} {
   return {
     httpOnly: true,
     sameSite: "strict",
@@ -81,9 +89,8 @@ export function cookieOptions() {
   };
 }
 
-export function parseCookies(header) {
-  /** @type {Record<string, string>} */
-  const out = {};
+export function parseCookies(header: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
   if (!header) return out;
   for (const part of header.split(";")) {
     const idx = part.indexOf("=");

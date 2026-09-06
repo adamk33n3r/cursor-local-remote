@@ -5,9 +5,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "node:url";
 import next from "next";
-import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies } from "./login.mjs";
+import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies } from "./login";
 import { listHosts } from "./hosts";
 import { hostsPageHtml } from "./hosts-page";
+import { originFromRequestHeaders, urlOnRequestOrigin } from "./request-origin";
 import { attachTunnel, proxyHostHttp } from "./tunnel";
 import type { UpgradeHandler } from "./tunnel";
 
@@ -17,6 +18,64 @@ type NextWithUpgrade = ReturnType<typeof next> & {
   didWebSocketSetup?: boolean;
   upgradeHandler?: UpgradeHandler;
 };
+
+function locationOnRequestOrigin(req: IncomingMessage, value: string): string {
+  const origin = originFromRequestHeaders(req.headers);
+  if (!origin) {
+    if (value.startsWith("/") && !value.startsWith("//")) return value;
+    try {
+      const url = new URL(value);
+      return `${url.pathname}${url.search}${url.hash}` || "/";
+    } catch {
+      return value;
+    }
+  }
+  try {
+    let path = value;
+    if (!value.startsWith("/") || value.startsWith("//")) {
+      const url = new URL(value);
+      path = `${url.pathname}${url.search}${url.hash}` || "/";
+    }
+    return urlOnRequestOrigin(req.headers, path);
+  } catch {
+    return value;
+  }
+}
+
+function rewriteLocationValue(
+  req: IncomingMessage,
+  value: number | string | readonly string[],
+): number | string | readonly string[] {
+  if (typeof value === "string") return locationOnRequestOrigin(req, value);
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      typeof item === "string" ? locationOnRequestOrigin(req, item) : item,
+    );
+  }
+  return value;
+}
+
+/**
+ * Next rewrites Location against its listen hostname. Put the Client's Host
+ * (or forwarded host) back so a domain / reverse proxy never sees 0.0.0.0.
+ */
+function attachRequestOriginRedirects(req: IncomingMessage, res: ServerResponse): void {
+  const originalSetHeader = res.setHeader.bind(res);
+  res.setHeader = ((name: string, value: number | string | readonly string[]) => {
+    if (name.toLowerCase() === "location") {
+      return originalSetHeader(name, rewriteLocationValue(req, value));
+    }
+    return originalSetHeader(name, value);
+  }) as typeof res.setHeader;
+
+  const originalAppend = res.appendHeader.bind(res);
+  res.appendHeader = ((name: string, value: string | readonly string[]) => {
+    if (name.toLowerCase() === "location") {
+      return originalAppend(name, rewriteLocationValue(req, value) as string | readonly string[]);
+    }
+    return originalAppend(name, value);
+  }) as typeof res.appendHeader;
+}
 
 /**
  * Login gate in Node. Next Edge middleware inlines env at build, so CLI
@@ -45,7 +104,7 @@ async function gate(req: IncomingMessage, res: ServerResponse): Promise<boolean>
   }
   if (pathname === "/") {
     if (authed) {
-      res.writeHead(302, { Location: "/hosts" });
+      res.writeHead(302, { Location: urlOnRequestOrigin(req.headers, "/hosts") });
       res.end();
       return true;
     }
@@ -97,6 +156,7 @@ export async function listenWithNext(port: number, bind: string): Promise<Server
   const handle = app.getRequestHandler();
   const nextUpgrade = app.upgradeHandler;
   const server = createServer((req, res) => {
+    attachRequestOriginRedirects(req, res);
     void gate(req, res)
       .then(async (handled) => {
         if (handled) return;

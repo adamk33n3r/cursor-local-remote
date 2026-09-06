@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isLikelyVirtualNic, pickLanIpv4 } from "../src/lib/lan-ip.mjs";
+import { isLikelyVirtualNic, pickLanIpv4 } from "../src/lib/lan-ip";
 
 test("isLikelyVirtualNic flags VirtualBox and Hyper-V adapters", () => {
   assert.equal(isLikelyVirtualNic("Ethernet"), false);

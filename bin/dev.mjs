@@ -4,9 +4,12 @@ import { createServer } from "net";
 import { spawn } from "child_process";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { getLanIp } from "../src/lib/lan-ip.mjs";
 import { randomInt } from "crypto";
 import qrcode from "qrcode-terminal";
+import { register } from "tsx/esm/api";
+
+register();
+const { getLanIp } = await import("../src/lib/lan-ip.ts");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");

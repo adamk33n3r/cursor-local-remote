@@ -4,13 +4,14 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getLanIp } from "../lib/lan-ip.mjs";
 import { register } from "tsx/esm/api";
 
 // Node cannot load TypeScript until tsx is registered. ESM static imports are
 // hoisted, so listenWithNext stays as a top-level dynamic import.
 register();
 const { listenWithNext } = await import("../lib/listen-with-next.ts");
+const { getLanIp } = await import("../lib/lan-ip.ts");
+const { closeHttpServer } = await import("../lib/stop-http.ts");
 
 const DEFAULT_PORT = 3200;
 const DEFAULT_BIND = "0.0.0.0";
@@ -148,8 +149,13 @@ if (!login) {
 console.log("  Press Ctrl+C to stop");
 console.log("");
 
+let shuttingDown = false;
 function shutdown() {
-  server.close(() => process.exit(0));
+  if (shuttingDown) {
+    process.exit(1);
+  }
+  shuttingDown = true;
+  void closeHttpServer(server).finally(() => process.exit(0));
 }
 
 process.on("SIGINT", shutdown);

@@ -4,22 +4,27 @@ import { networkInterfaces } from "node:os";
 const VIRTUAL_NIC_RE =
   /virtualbox|vmware|vbox|hyper-v|vethernet|wsl|docker|loopback|bluetooth|pseudo|hamachi|zerotier|radmin|npcap|tap-windows|qemu|hyperv/i;
 
-/** Same LAN pick as the Host: skip virtual NICs, prefer the default-route address. */
-export function isLikelyVirtualNic(name) {
+type NicAddr = { address: string; family: string | number; internal: boolean };
+type LanCandidate = { name: string; address: string; virtual: boolean };
+
+/**
+ * Virtual adapters (VirtualBox Host-Only, Hyper-V, etc.) often appear first in
+ * os.networkInterfaces() and are not the LAN the phone is on.
+ */
+export function isLikelyVirtualNic(name: string): boolean {
   return VIRTUAL_NIC_RE.test(name);
 }
 
-function isIpv4(addr) {
+function isIpv4(addr: NicAddr): boolean {
   return addr.family === "IPv4" || addr.family === 4;
 }
 
-function isUsableLan(addr) {
+function isUsableLan(addr: NicAddr): boolean {
   return isIpv4(addr) && !addr.internal && !addr.address.startsWith("169.254.");
 }
 
-function collectCandidates(nics) {
-  /** @type {{ name: string, address: string, virtual: boolean }[]} */
-  const out = [];
+function collectCandidates(nics: NodeJS.Dict<NicAddr[]>): LanCandidate[] {
+  const out: LanCandidate[] = [];
   for (const [name, addrs] of Object.entries(nics)) {
     if (!addrs) continue;
     const virtual = isLikelyVirtualNic(name);
@@ -30,7 +35,14 @@ function collectCandidates(nics) {
   return out;
 }
 
-export function pickLanIpv4(nics, defaultRouteIp) {
+/**
+ * Prefer the OS default-route source address when it belongs to a local NIC.
+ * Otherwise skip virtual NICs, then any remaining IPv4.
+ */
+export function pickLanIpv4(
+  nics: NodeJS.Dict<NicAddr[]>,
+  defaultRouteIp: string | null,
+): string | null {
   const candidates = collectCandidates(nics);
   if (defaultRouteIp) {
     const match = candidates.find((c) => c.address === defaultRouteIp);
@@ -41,10 +53,14 @@ export function pickLanIpv4(nics, defaultRouteIp) {
   return candidates[0]?.address ?? null;
 }
 
-export function getDefaultRouteIpv4() {
+/**
+ * UDP connect uses the routing table without sending a packet, so the bound
+ * address is the NIC that would reach the internet (has a default gateway).
+ */
+export function getDefaultRouteIpv4(): Promise<string | null> {
   return new Promise((resolve) => {
     const socket = createSocket("udp4");
-    const finish = (ip) => {
+    const finish = (ip: string | null) => {
       try {
         socket.close();
       } catch {
@@ -69,7 +85,7 @@ export function getDefaultRouteIpv4() {
   });
 }
 
-export async function getLanIp() {
+export async function getLanIp(): Promise<string | null> {
   const nics = networkInterfaces();
   const defaultRouteIp = await getDefaultRouteIpv4();
   return pickLanIpv4(nics, defaultRouteIp);

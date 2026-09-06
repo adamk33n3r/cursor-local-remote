@@ -4,7 +4,6 @@ import { spawn, execFileSync } from "child_process";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { hostname as osHostname } from "os";
-import { getLanIp } from "../src/lib/lan-ip.mjs";
 import { existsSync, readFileSync } from "fs";
 import { randomInt } from "crypto";
 import { createServer } from "net";
@@ -18,6 +17,7 @@ import { register } from "tsx/esm/api";
 // Node cannot load TypeScript until tsx is registered. ESM static imports are
 // hoisted, so Host identity/lock/tunnel stay as top-level dynamic imports.
 register();
+const { getLanIp } = await import("../src/lib/lan-ip.ts");
 const { hostStateDir, loadOrCreateHostId } = await import("../src/lib/host-identity.ts");
 const { clearHostLock, findExistingHost, writeHostLock } = await import("../src/lib/host-lock.ts");
 const { connectHostTunnel } = await import("../src/lib/tunnel-client.ts");

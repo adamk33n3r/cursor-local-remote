@@ -1,4 +1,4 @@
-import { getLanIp } from "./lan-ip.mjs";
+import { getLanIp } from "./lan-ip";
 
 export async function getNetworkInfo(port: number = 3100) {
   const lanIp = await getLanIp();
@@ -9,4 +9,4 @@ export async function getNetworkInfo(port: number = 3100) {
   };
 }
 
-export { getDefaultRouteIpv4, getLanIp, isLikelyVirtualNic, pickLanIpv4 } from "./lan-ip.mjs";
+export { getDefaultRouteIpv4, getLanIp, isLikelyVirtualNic, pickLanIpv4 } from "./lan-ip";

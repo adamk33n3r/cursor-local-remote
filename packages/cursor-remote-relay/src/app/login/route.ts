@@ -5,7 +5,8 @@ import {
   loginCookieValue,
   loginFromEnv,
   safeEqual,
-} from "../../../lib/login.mjs";
+} from "../../../lib/login";
+import { urlOnRequestOrigin } from "../../../lib/request-origin";
 
 export const runtime = "nodejs";
 
@@ -37,7 +38,7 @@ export async function POST(req: Request) {
     return new NextResponse("Wrong username or password.", { status: 401 });
   }
 
-  const res = NextResponse.redirect(new URL("/hosts", req.url), 303);
+  const res = NextResponse.redirect(urlOnRequestOrigin(req.headers, "/hosts"), 303);
   res.cookies.set(
     LOGIN_COOKIE,
     await loginCookieValue(login.username, login.password),

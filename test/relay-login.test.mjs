@@ -6,7 +6,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { getLanIp } from "../packages/cursor-remote-relay/lib/lan-ip.mjs";
+import { register } from "tsx/esm/api";
+
+register();
+const { getLanIp } = await import("../packages/cursor-remote-relay/lib/lan-ip.ts");
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const relayCli = join(root, "packages", "cursor-remote-relay", "bin", "cursor-remote-relay.mjs");
@@ -264,4 +267,50 @@ test("starting Relay never starts a Host", async (t) => {
 
   const hostInfo = await fetch(`http://127.0.0.1:${port}/api/info`);
   assert.equal(hostInfo.status, 404);
+});
+
+test("Login redirect uses the Client origin, not the 0.0.0.0 bind address", async (t) => {
+  const port = await freePort();
+  const proc = startRelay(
+    ["--port", String(port)],
+    relayEnv({ LOGIN_USERNAME: "relay-user", LOGIN_PASSWORD: "correct-horse" }),
+  );
+  t.after(() => stopRelay(proc));
+  await waitForStdout(proc, /Press Ctrl\+C to stop/, 60_000);
+
+  const loginRes = await fetch(`http://127.0.0.1:${port}/login`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    redirect: "manual",
+    body: "username=relay-user&password=correct-horse",
+  });
+  assert.ok(loginRes.status === 302 || loginRes.status === 303);
+  const location = loginRes.headers.get("location") ?? "";
+  assert.equal(location, `http://127.0.0.1:${port}/hosts`);
+
+  const proxied = await fetch(`http://127.0.0.1:${port}/login`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      "x-forwarded-host": "relay.example",
+      "x-forwarded-proto": "https",
+    },
+    redirect: "manual",
+    body: "username=relay-user&password=correct-horse",
+  });
+  assert.ok(proxied.status === 302 || proxied.status === 303);
+  assert.equal(proxied.headers.get("location"), "https://relay.example/hosts");
+
+  const form = new FormData();
+  form.set("username", "relay-user");
+  form.set("password", "correct-horse");
+  const multipart = await fetch(`http://127.0.0.1:${port}/login`, {
+    method: "POST",
+    redirect: "manual",
+    body: form,
+  });
+  assert.ok(
+    multipart.status === 302 || multipart.status === 303,
+    `multipart Login got ${multipart.status}`,
+  );
 });

@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 import { WebSocket, WebSocketServer } from "ws";
 import { isLanSourceIp } from "./source-ip";
 import { getOnlineHost, markHostOffline, putHost } from "./hosts";
-import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies } from "./login.mjs";
+import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies } from "./login";
 
 const TUNNEL_PATH = "/tunnel";
 const HOP_BY_HOP = new Set([
