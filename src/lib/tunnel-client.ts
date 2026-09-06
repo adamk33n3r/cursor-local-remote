@@ -13,7 +13,13 @@ export type ConnectHostTunnelOpts = {
   id: string;
   name: string;
   authToken?: string;
+  reconnectMs?: number;
+  log?: (message: string) => void;
 };
+
+// Keep retrying after the Relay process dies; 3s is frequent enough to
+// come back with the Host list without hammering a down listener.
+const DEFAULT_RECONNECT_MS = 3_000;
 
 type TunnelHttpRequest = {
   type: "http-request";
@@ -125,8 +131,18 @@ function asInbound(raw: WebSocket.RawData): TunnelInbound | null {
 
 export function connectHostTunnel(opts: ConnectHostTunnelOpts): Promise<HostTunnel> {
   const { relayUrl, localOrigin, id, name, authToken } = opts;
-  const ws = new WebSocket(toWsUrl(relayUrl));
+  const reconnectMs = opts.reconnectMs ?? DEFAULT_RECONNECT_MS;
+  const log = opts.log ?? ((message: string) => console.log(message));
   const localSockets = new Map<string, WebSocket>();
+
+  let stopped = false;
+  let everRegistered = false;
+  let outageAnnounced = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let ws: WebSocket | null = null;
+  let readySettled = false;
+  let resolveReady: (handle: HostTunnel) => void = () => undefined;
+  let rejectReady: (err: Error) => void = () => undefined;
 
   function closeLocal(channelId: string, code: number, reason: string): void {
     const local = localSockets.get(channelId);
@@ -135,17 +151,21 @@ export function connectHostTunnel(opts: ConnectHostTunnelOpts): Promise<HostTunn
     if (local.readyState === WebSocket.OPEN) local.close(code || 1000, reason || "");
   }
 
-  function handleMessage(raw: WebSocket.RawData): void {
+  function closeAllLocals(): void {
+    for (const channelId of [...localSockets.keys()]) closeLocal(channelId, 1000, "");
+  }
+
+  function handleMessage(socket: WebSocket, raw: WebSocket.RawData): void {
     const msg = asInbound(raw);
     if (!msg) return;
 
     switch (msg.type) {
       case "http-request": {
         void localHttp(localOrigin, msg, authToken)
-          .then((reply) => sendJson(ws, reply))
+          .then((reply) => sendJson(socket, reply))
           .catch((err: unknown) => {
             const message = err instanceof Error ? err.message : String(err);
-            sendJson(ws, {
+            sendJson(socket, {
               type: "http-response",
               id: msg.id,
               status: 502,
@@ -163,11 +183,11 @@ export function connectHostTunnel(opts: ConnectHostTunnelOpts): Promise<HostTunn
         const local = new WebSocket(target.toString(), { headers: headers as IncomingHttpHeaders });
         localSockets.set(msg.id, local);
         local.once("open", () => {
-          sendJson(ws, { type: "ws-opened", id: msg.id });
+          sendJson(socket, { type: "ws-opened", id: msg.id });
         });
         local.on("message", (data, isBinary) => {
           const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
-          sendJson(ws, {
+          sendJson(socket, {
             type: "ws-data",
             id: msg.id,
             data: buf.toString("base64"),
@@ -176,7 +196,7 @@ export function connectHostTunnel(opts: ConnectHostTunnelOpts): Promise<HostTunn
         });
         local.on("close", (code, reason) => {
           localSockets.delete(msg.id);
-          sendJson(ws, {
+          sendJson(socket, {
             type: "ws-close",
             id: msg.id,
             code,
@@ -184,7 +204,7 @@ export function connectHostTunnel(opts: ConnectHostTunnelOpts): Promise<HostTunn
           });
         });
         local.on("error", () => {
-          sendJson(ws, { type: "ws-close", id: msg.id, code: 1011, reason: "local WebSocket error" });
+          sendJson(socket, { type: "ws-close", id: msg.id, code: 1011, reason: "local WebSocket error" });
         });
         return;
       }
@@ -209,60 +229,108 @@ export function connectHostTunnel(opts: ConnectHostTunnelOpts): Promise<HostTunn
     }
   }
 
-  const ready = new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new Error("timed out registering with Relay"));
+  function clearReconnectTimer(): void {
+    if (!reconnectTimer) return;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
+  function announceOutage(): void {
+    if (!outageAnnounced) {
+      outageAnnounced = true;
+      log(everRegistered ? "  Relay connection lost" : "  Relay connection failed");
+    }
+    log("  Retrying Relay connection...");
+  }
+
+  function scheduleReconnect(): void {
+    if (stopped || reconnectTimer) return;
+    announceOutage();
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (stopped) return;
+      openSocket();
+    }, reconnectMs);
+  }
+
+  function openSocket(): void {
+    if (stopped) return;
+    const socket = new WebSocket(toWsUrl(relayUrl));
+    ws = socket;
+    let attemptDone = false;
+
+    const registerTimer = setTimeout(() => {
+      if (attemptDone || stopped) return;
+      socket.terminate();
     }, 8_000);
-    ws.once("open", () => {
-      sendJson(ws, { type: "register", id, name });
+
+    socket.once("open", () => {
+      sendJson(socket, { type: "register", id, name });
     });
-    ws.on("message", (raw) => {
+    socket.on("message", (raw) => {
       const msg = asInbound(raw);
       if (msg && msg.type === "registered") {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve();
+        if (!attemptDone) {
+          attemptDone = true;
+          clearTimeout(registerTimer);
+          const wasReconnect = everRegistered;
+          everRegistered = true;
+          if (wasReconnect) log("  Reconnected to Relay");
+          outageAnnounced = false;
+          if (!readySettled) {
+            readySettled = true;
+            resolveReady(handle);
+          }
         }
         return;
       }
-      handleMessage(raw);
+      handleMessage(socket, raw);
     });
-    ws.once("error", (err) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(err);
+    socket.on("error", () => {
+      // close follows; swallowing avoids an unhandled 'error' crash
     });
-    ws.once("close", (code, reason) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(new Error(`Tunnel closed before registration (code=${code} reason=${String(reason)})`));
+    socket.once("close", () => {
+      clearTimeout(registerTimer);
+      if (ws === socket) ws = null;
+      closeAllLocals();
+      if (stopped) return;
+      attemptDone = true;
+      scheduleReconnect();
     });
-  });
+  }
 
-  return ready.then(() => ({
+  const handle: HostTunnel = {
     close: () =>
       new Promise<void>((resolve) => {
+        stopped = true;
+        clearReconnectTimer();
+        closeAllLocals();
+        if (!readySettled) {
+          readySettled = true;
+          rejectReady(new Error("Tunnel closed before Registration"));
+        }
+        const current = ws;
+        if (!current || current.readyState === WebSocket.CLOSED) {
+          resolve();
+          return;
+        }
         const finish = (): void => {
           clearTimeout(timer);
           resolve();
         };
         const timer = setTimeout(() => {
-          ws.terminate();
+          current.terminate();
           finish();
         }, 2_000);
-        for (const channelId of [...localSockets.keys()]) closeLocal(channelId, 1000, "");
-        if (ws.readyState === WebSocket.CLOSED) {
-          finish();
-          return;
-        }
-        ws.once("close", () => finish());
-        ws.close();
+        current.once("close", () => finish());
+        current.close();
       }),
-  }));
+  };
+
+  const ready = new Promise<HostTunnel>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  openSocket();
+  return ready;
 }
