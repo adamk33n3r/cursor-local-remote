@@ -5,9 +5,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "node:url";
 import next from "next";
-import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies } from "./login";
+import { isAuthedCookie, LOGIN_COOKIE, clearPickCookieHeader, loginFromEnv, parseCookies, PICK_COOKIE } from "./login";
 import { listHosts } from "./hosts";
-import { hostsPageHtml } from "./hosts-page";
 import { originFromRequestHeaders, urlOnRequestOrigin } from "./request-origin";
 import { attachTunnel, proxyHostHttp } from "./tunnel";
 import type { UpgradeHandler } from "./tunnel";
@@ -91,11 +90,14 @@ async function gate(req: IncomingMessage, res: ServerResponse): Promise<boolean>
 
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   const pathname = url.pathname;
-  if (pathname.startsWith("/_next/") || pathname === "/favicon.ico") {
+  const cookies = parseCookies(req.headers.cookie);
+  if (
+    (pathname.startsWith("/_next/") || pathname === "/favicon.ico") &&
+    !cookies[PICK_COOKIE]
+  ) {
     return false;
   }
 
-  const cookies = parseCookies(req.headers.cookie);
   const authed = await isAuthedCookie(cookies[LOGIN_COOKIE], login);
   const method = req.method ?? "GET";
 
@@ -127,13 +129,9 @@ async function gate(req: IncomingMessage, res: ServerResponse): Promise<boolean>
     return true;
   }
   if (authed && method === "GET" && pathname === "/api/hosts") {
+    // Same process as Registration. Next's /api/hosts route cannot see that Map.
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ hosts: listHosts() }));
-    return true;
-  }
-  if (authed && method === "GET" && pathname === "/hosts") {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(hostsPageHtml());
     return true;
   }
   return false;
@@ -157,6 +155,10 @@ export async function listenWithNext(port: number, bind: string): Promise<Server
   const nextUpgrade = app.upgradeHandler;
   const server = createServer((req, res) => {
     attachRequestOriginRedirects(req, res);
+    const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+    if (pathname === "/hosts") {
+      res.appendHeader("Set-Cookie", clearPickCookieHeader());
+    }
     void gate(req, res)
       .then(async (handled) => {
         if (handled) return;

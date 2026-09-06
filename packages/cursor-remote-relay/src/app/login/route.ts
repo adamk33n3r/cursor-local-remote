@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   cookieOptions,
   LOGIN_COOKIE,
+  PICK_COOKIE,
   loginCookieValue,
   loginFromEnv,
   safeEqual,
@@ -44,5 +45,6 @@ export async function POST(req: Request) {
     await loginCookieValue(login.username, login.password),
     cookieOptions(),
   );
+  res.cookies.set(PICK_COOKIE, "", { ...cookieOptions(), maxAge: 0 });
   return res;
 }

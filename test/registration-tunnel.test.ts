@@ -129,6 +129,16 @@ function startStubHost(): Promise<{ port: number; close: () => Promise<void> }> 
       res.end("hello-from-host");
       return;
     }
+    if (pathname === "/_next/static/css/app/page.css") {
+      res.writeHead(200, { "Content-Type": "text/css; charset=utf-8" });
+      res.end("host-page-css");
+      return;
+    }
+    if (pathname === "/icon.png") {
+      res.writeHead(200, { "Content-Type": "image/png" });
+      res.end("host-icon");
+      return;
+    }
     if (pathname === "/api/info") {
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ workspace: "/stub-workspace", ok: true }));
@@ -201,9 +211,8 @@ test("LAN Registration appears on the Host list; reconnect with the same id is t
   });
 
   const listHtml = await (await fetch(`http://127.0.0.1:${relayPort}/hosts`, { headers })).text();
-  assert.match(listHtml, /data-host-row/);
-  assert.match(listHtml, new RegExp(`data-host-id="${hostId}"`));
-  assert.match(listHtml, /Desk PC/);
+  assert.match(listHtml, /Hosts/);
+  assert.match(listHtml, /\/_next\//);
 
   await tunnel.close();
   const tunnel2 = await connectHostTunnel({
@@ -271,6 +280,37 @@ test("after Login and pick, Relay proxies Host HTTP and one WebSocket without a 
   });
   assert.equal(hello.status, 200);
   assert.equal(await hello.text(), "hello-from-host");
+
+  const pickSet = ui.headers.getSetCookie().find((c) => c.startsWith("cr_pick="));
+  assert.ok(pickSet, `expected cr_pick Set-Cookie, got ${JSON.stringify(ui.headers.getSetCookie())}`);
+  const sticky = `${cookie}; ${pickSet.split(";")[0]}`;
+
+  const cssOnRelay = await fetch(
+    `http://127.0.0.1:${relayPort}/_next/static/css/app/page.css`,
+    { headers, signal: AbortSignal.timeout(10_000) },
+  );
+  assert.notEqual(await cssOnRelay.text(), "host-page-css");
+
+  const cssSticky = await fetch(`http://127.0.0.1:${relayPort}/_next/static/css/app/page.css`, {
+    headers: { cookie: sticky },
+    signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(cssSticky.status, 200);
+  assert.equal(await cssSticky.text(), "host-page-css");
+
+  const iconSticky = await fetch(`http://127.0.0.1:${relayPort}/icon.png`, {
+    headers: { cookie: sticky },
+    signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(iconSticky.status, 200);
+  assert.equal(await iconSticky.text(), "host-icon");
+
+  const apiSticky = await fetch(`http://127.0.0.1:${relayPort}/api/info`, {
+    headers: { cookie: sticky },
+    signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(apiSticky.status, 200);
+  assert.deepEqual(await apiSticky.json(), { workspace: "/stub-workspace", ok: true });
 
   const ws = new WebSocket(`ws://127.0.0.1:${relayPort}/h/${hostId}/echo`, {
     headers: { cookie },

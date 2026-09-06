@@ -1,0 +1,46 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { PICK_COOKIE } from "../packages/cursor-remote-relay/lib/login";
+import {
+  isRelayOwnedPath,
+  isStickyHostPath,
+  resolveHostProxy,
+} from "../packages/cursor-remote-relay/lib/host-pick";
+
+test("Host UI root-absolute assets are sticky; Host list stays on Relay", () => {
+  assert.equal(isStickyHostPath("/_next/static/css/app/page.css"), true);
+  assert.equal(isStickyHostPath("/icon.png"), true);
+  assert.equal(isStickyHostPath("/api/chat"), true);
+  assert.equal(isRelayOwnedPath("/hosts"), true);
+  assert.equal(isRelayOwnedPath("/api/hosts"), true);
+  assert.equal(isStickyHostPath("/hosts"), false);
+});
+
+test("resolveHostProxy strips /h/:id and otherwise uses the pick cookie", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  assert.deepEqual(resolveHostProxy(`/h/${id}/`, "", undefined), {
+    hostId: id,
+    forwardUrl: "/",
+    viaPrefix: true,
+  });
+  assert.equal(resolveHostProxy("/_next/static/css/app/page.css", "", undefined), null);
+  assert.deepEqual(
+    resolveHostProxy("/_next/static/css/app/page.css", "", `${PICK_COOKIE}=${id}`),
+    {
+      hostId: id,
+      forwardUrl: "/_next/static/css/app/page.css",
+      viaPrefix: false,
+    },
+  );
+  assert.deepEqual(resolveHostProxy("/icon.png", "", `${PICK_COOKIE}=${id}`), {
+    hostId: id,
+    forwardUrl: "/icon.png",
+    viaPrefix: false,
+  });
+  assert.deepEqual(resolveHostProxy("/api/info", "", `${PICK_COOKIE}=${id}`), {
+    hostId: id,
+    forwardUrl: "/api/info",
+    viaPrefix: false,
+  });
+  assert.equal(resolveHostProxy("/api/hosts", "", `${PICK_COOKIE}=${id}`), null);
+});

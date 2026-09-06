@@ -1,4 +1,5 @@
 export const LOGIN_COOKIE = "cr_login";
+export const PICK_COOKIE = "cr_pick";
 export const COOKIE_MAX_AGE_S = 60 * 60 * 24 * 7;
 
 export type LoginCredentials = { username: string; password: string };
@@ -98,4 +99,12 @@ export function parseCookies(header: string | undefined): Record<string, string>
     out[part.slice(0, idx).trim()] = part.slice(idx + 1).trim();
   }
   return out;
+}
+
+export function pickCookieHeader(hostId: string): string {
+  return `${PICK_COOKIE}=${encodeURIComponent(hostId)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE_S}`;
+}
+
+export function clearPickCookieHeader(): string {
+  return `${PICK_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`;
 }

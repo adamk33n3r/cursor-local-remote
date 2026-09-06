@@ -5,7 +5,8 @@ import { Buffer } from "node:buffer";
 import { WebSocket, WebSocketServer } from "ws";
 import { isLanSourceIp } from "./source-ip";
 import { getOnlineHost, markHostOffline, putHost } from "./hosts";
-import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies } from "./login";
+import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies, pickCookieHeader } from "./login";
+import { resolveHostProxy } from "./host-pick";
 
 const TUNNEL_PATH = "/tunnel";
 const HOP_BY_HOP = new Set([
@@ -57,11 +58,9 @@ function pathnameOf(req: IncomingMessage): string {
   return new URL(req.url ?? "/", "http://127.0.0.1").pathname;
 }
 
-function parseHostPath(pathname: string): { hostId: string; rest: string } | null {
-  const match = /^\/h\/([^/]+)(\/.*)?$/.exec(pathname);
-  if (!match) return null;
-  const rest = match[2] && match[2].length > 0 ? match[2] : "/";
-  return { hostId: decodeURIComponent(match[1]), rest };
+function targetOf(req: IncomingMessage) {
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  return resolveHostProxy(url.pathname, url.search, req.headers.cookie);
 }
 
 function filterHeaders(headers: IncomingMessage["headers"] | HeaderMap): HeaderMap {
@@ -244,12 +243,30 @@ function waitForHttpResponse(
   });
 }
 
-export async function proxyHostHttp(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-  const url = new URL(req.url ?? "/", "http://127.0.0.1");
-  const parsed = parseHostPath(url.pathname);
-  if (!parsed) return false;
+function appendSetCookie(headers: HeaderMap, value: string): void {
+  const existing = headers["set-cookie"];
+  if (existing === undefined) {
+    headers["set-cookie"] = value;
+    return;
+  }
+  if (Array.isArray(existing)) {
+    headers["set-cookie"] = [...existing, value];
+    return;
+  }
+  headers["set-cookie"] = [existing, value];
+}
 
-  const host = getOnlineHost(parsed.hostId);
+export async function proxyHostHttp(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  const target = targetOf(req);
+  if (!target) return false;
+
+  if (!(await clientIsAuthed(req))) {
+    res.writeHead(401, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end();
+    return true;
+  }
+
+  const host = getOnlineHost(target.hostId);
   if (!host?.socket) {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Host is not online.\n");
@@ -258,12 +275,11 @@ export async function proxyHostHttp(req: IncomingMessage, res: ServerResponse): 
 
   const body = await readRequestBody(req);
   const requestId = randomUUID();
-  const forwardUrl = `${parsed.rest}${url.search}`;
   sendJson(host.socket, {
     type: "http-request",
     id: requestId,
     method: req.method ?? "GET",
-    url: forwardUrl,
+    url: target.forwardUrl,
     headers: filterHeaders(req.headers),
     body: body.length > 0 ? body.toString("base64") : "",
   });
@@ -273,6 +289,9 @@ export async function proxyHostHttp(req: IncomingMessage, res: ServerResponse): 
     const headers = filterHeaders(reply.headers ?? {});
     const payload = reply.body ? Buffer.from(reply.body, "base64") : Buffer.alloc(0);
     headers["content-length"] = String(payload.length);
+    if (target.viaPrefix) {
+      appendSetCookie(headers, pickCookieHeader(target.hostId));
+    }
     res.writeHead(Number(reply.status) || 502, headers);
     res.end(payload);
   } catch {
@@ -290,13 +309,12 @@ function handleClientWsUpgrade(
   socket: Duplex,
   head: Buffer,
 ): void {
-  const url = new URL(req.url ?? "/", "http://127.0.0.1");
-  const parsed = parseHostPath(url.pathname);
-  if (!parsed) {
+  const target = targetOf(req);
+  if (!target) {
     socket.destroy();
     return;
   }
-  const host = getOnlineHost(parsed.hostId);
+  const host = getOnlineHost(target.hostId);
   if (!host?.socket) {
     rejectSocket(socket, 404, "Not Found");
     return;
@@ -309,7 +327,7 @@ function handleClientWsUpgrade(
       return;
     }
     const channelId = randomUUID();
-    const forwardUrl = `${parsed.rest}${url.search}`;
+    const forwardUrl = target.forwardUrl;
     const pending = pendingMaps(hostSocket);
     let opened = false;
     const timer = setTimeout(() => {
@@ -364,7 +382,7 @@ export function attachTunnel(server: Server, fallbackUpgrade?: UpgradeHandler): 
       handleTunnelUpgrade(wss, req, socket, head);
       return;
     }
-    if (parseHostPath(pathname)) {
+    if (targetOf(req)) {
       handleClientWsUpgrade(wss, req, socket, head);
       return;
     }

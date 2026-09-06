@@ -206,6 +206,7 @@ test("set Login: HttpOnly cookie lasts seven days and Host list is empty", async
   const listHtml = await listRes.text();
   assert.match(listHtml, /Host/i);
   assert.match(listHtml, /Logout/i);
+  assert.match(listHtml, /\/_next\//);
   assert.doesNotMatch(listHtml, /data-host-id=/);
   const hostRows = listHtml.match(/data-host-row/g) ?? [];
   assert.equal(hostRows.length, 0);
