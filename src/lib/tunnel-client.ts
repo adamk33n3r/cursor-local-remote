@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import http from "node:http";
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
 import { WebSocket } from "ws";
+import { VIA_RELAY_HEADER, VIA_RELAY_VALUE } from "./via-relay";
 
 export type HostTunnel = {
   close: () => Promise<void>;
@@ -86,6 +87,7 @@ function localHttp(
 ): Promise<TunnelHttpResponse> {
   const target = new URL(msg.url, localOrigin);
   const headers = filterHopByHop(msg.headers ?? {});
+  headers[VIA_RELAY_HEADER] = VIA_RELAY_VALUE;
   if (authToken) headers.authorization = `Bearer ${authToken}`;
   const body = msg.body ? Buffer.from(msg.body, "base64") : null;
   return new Promise((resolve, reject) => {

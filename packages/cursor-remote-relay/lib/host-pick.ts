@@ -13,6 +13,16 @@ export function parseHostPath(pathname: string): { hostId: string; rest: string 
   return { hostId: decodeURIComponent(match[1]), rest };
 }
 
+/** Login `next` may only be a Host pick URL (`/h/:id/`), never an open redirect. */
+export function hostPickNextPath(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (!value.startsWith("/") || value.startsWith("//")) return null;
+  const pathname = value.split("?")[0] ?? "";
+  const parsed = parseHostPath(pathname);
+  if (!parsed || parsed.rest !== "/") return null;
+  return `/h/${encodeURIComponent(parsed.hostId)}/`;
+}
+
 export function isRelayOwnedPath(pathname: string): boolean {
   if (
     pathname === "/" ||

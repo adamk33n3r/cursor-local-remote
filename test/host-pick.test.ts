@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PICK_COOKIE } from "../packages/cursor-remote-relay/lib/login";
-import {
-  isRelayOwnedPath,
-  isStickyHostPath,
-  resolveHostProxy,
-} from "../packages/cursor-remote-relay/lib/host-pick";
+import { hostPickNextPath, isRelayOwnedPath, isStickyHostPath, resolveHostProxy } from "../packages/cursor-remote-relay/lib/host-pick";
 
 test("Host UI root-absolute assets are sticky; Host list stays on Relay", () => {
   assert.equal(isStickyHostPath("/_next/static/css/app/page.css"), true);
@@ -13,6 +9,7 @@ test("Host UI root-absolute assets are sticky; Host list stays on Relay", () => 
   assert.equal(isStickyHostPath("/api/chat"), true);
   assert.equal(isRelayOwnedPath("/hosts"), true);
   assert.equal(isRelayOwnedPath("/api/hosts"), true);
+  assert.equal(isRelayOwnedPath("/api/hosts/live"), true);
   assert.equal(isStickyHostPath("/hosts"), false);
 });
 
@@ -43,4 +40,13 @@ test("resolveHostProxy strips /h/:id and otherwise uses the pick cookie", () => 
     viaPrefix: false,
   });
   assert.equal(resolveHostProxy("/api/hosts", "", `${PICK_COOKIE}=${id}`), null);
+});
+
+test("hostPickNextPath only allows a Host pick URL", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  assert.equal(hostPickNextPath(`/h/${id}/`), `/h/${id}/`);
+  assert.equal(hostPickNextPath(`/h/${id}`), `/h/${id}/`);
+  assert.equal(hostPickNextPath(`/h/${id}/api/info`), null);
+  assert.equal(hostPickNextPath("https://evil.example/h/x/"), null);
+  assert.equal(hostPickNextPath("/hosts"), null);
 });

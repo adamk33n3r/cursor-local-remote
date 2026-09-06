@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 
-export function LoginForm() {
+export function LoginForm({ next }: { next: string }) {
   const [failed, setFailed] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -11,13 +11,18 @@ export function LoginForm() {
     const res = await fetch("/login", {
       method: "POST",
       body: new FormData(event.currentTarget),
+      redirect: "manual",
     });
     if (res.status === 401) {
       setFailed(true);
       return;
     }
-    // Opaque 303 (status 0) still sets the Login cookie; go to the Host list.
-    window.location.assign("/hosts");
+    const location = res.headers.get("location");
+    if (location) {
+      window.location.assign(location);
+      return;
+    }
+    window.location.assign(next || "/hosts");
   }
 
   return (
@@ -32,6 +37,7 @@ export function LoginForm() {
           onSubmit={onSubmit}
           className="space-y-3 rounded-t-3xl bg-bg p-5"
         >
+          {next ? <input type="hidden" name="next" value={next} /> : null}
           <input
             name="username"
             placeholder="Username"

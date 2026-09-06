@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { PwaInstall } from "@/components/pwa-install";
+import { RelayChrome } from "@/components/relay-chrome";
+import { VIA_RELAY_HEADER, VIA_RELAY_VALUE } from "@/lib/via-relay";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -32,12 +35,14 @@ if('serviceWorker' in navigator){
   }
 }`;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const viaRelay = (await headers()).get(VIA_RELAY_HEADER) === VIA_RELAY_VALUE;
   return (
     <html lang="en">
-      <body className="overscroll-none">
+      <body className="overscroll-none flex h-dvh flex-col">
         <script dangerouslySetInnerHTML={{ __html: SW_CLEANUP_SCRIPT }} />
-        {children}
+        {viaRelay ? <RelayChrome /> : null}
+        <div className="min-h-0 flex-1">{children}</div>
         <PwaInstall />
       </body>
     </html>

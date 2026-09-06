@@ -14,9 +14,11 @@ export type HostListItem = {
 };
 
 const REGISTRY_KEY = "__cursorRemoteRelayHosts";
+const LISTENERS_KEY = "__cursorRemoteRelayHostListeners";
 
 type RelayGlobals = typeof globalThis & {
   [REGISTRY_KEY]?: Map<string, HostRecord>;
+  [LISTENERS_KEY]?: Set<() => void>;
 };
 
 function registry(): Map<string, HostRecord> {
@@ -26,6 +28,26 @@ function registry(): Map<string, HostRecord> {
   const created = new Map<string, HostRecord>();
   g[REGISTRY_KEY] = created;
   return created;
+}
+
+function listeners(): Set<() => void> {
+  const g = globalThis as RelayGlobals;
+  const existing = g[LISTENERS_KEY];
+  if (existing) return existing;
+  const created = new Set<() => void>();
+  g[LISTENERS_KEY] = created;
+  return created;
+}
+
+function emitHostsChange(): void {
+  for (const fn of listeners()) fn();
+}
+
+export function onHostsChange(fn: () => void): () => void {
+  listeners().add(fn);
+  return () => {
+    listeners().delete(fn);
+  };
 }
 
 export function listHosts(): HostListItem[] {
@@ -43,6 +65,7 @@ export function getHost(id: string): HostRecord | null {
 export function putHost(id: string, name: string, socket: WebSocket): HostRecord {
   const row: HostRecord = { id, name, online: true, socket };
   registry().set(id, row);
+  emitHostsChange();
   return row;
 }
 
@@ -51,6 +74,7 @@ export function markHostOffline(id: string): void {
   if (!row) return;
   row.online = false;
   row.socket = undefined;
+  emitHostsChange();
 }
 
 export function getOnlineHost(id: string): HostRecord | null {

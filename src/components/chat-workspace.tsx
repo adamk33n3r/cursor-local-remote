@@ -44,13 +44,13 @@ function getHashParams(): { sessionId: string | null; workspace: string | null }
   };
 }
 
-export function ChatWorkspace() {
+export function ChatWorkspace({ sidebarOpenInitially = false }: { sidebarOpenInitially?: boolean }) {
   const [instances, setInstances] = useState<ChatInstance[]>(() => {
     const { sessionId: hashSession, workspace: hashWorkspace } = getHashParams();
     return [makeInstance(hashSession ?? undefined, hashWorkspace ?? undefined)];
   });
   const [activeId, setActiveId] = useState<string>(() => instances[0].id);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(sidebarOpenInitially);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [defaultModel, setDefaultModel] = useState<string>("auto");
@@ -210,7 +210,7 @@ export function ChatWorkspace() {
   const currentSessionId = instances.find((i) => i.id === activeId)?.sessionId ?? null;
 
   return (
-    <div className="h-dvh">
+    <div className="h-full">
       {instances.map((inst) => (
         <div key={inst.id} className={inst.id === activeId ? "h-full" : "hidden"}>
           <ErrorBoundary fallback="inline">

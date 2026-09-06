@@ -4,9 +4,10 @@ import type { Duplex } from "node:stream";
 import { Buffer } from "node:buffer";
 import { WebSocket, WebSocketServer } from "ws";
 import { isLanSourceIp } from "./source-ip";
-import { getOnlineHost, markHostOffline, putHost } from "./hosts";
+import { getOnlineHost, listHosts, markHostOffline, onHostsChange, putHost } from "./hosts";
 import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies, pickCookieHeader } from "./login";
 import { resolveHostProxy } from "./host-pick";
+import { urlOnRequestOrigin } from "./request-origin";
 
 const TUNNEL_PATH = "/tunnel";
 const HOP_BY_HOP = new Set([
@@ -268,6 +269,13 @@ export async function proxyHostHttp(req: IncomingMessage, res: ServerResponse): 
 
   const host = getOnlineHost(target.hostId);
   if (!host?.socket) {
+    // Pick of an offline Host is not a successful pick. Send the Client back to the list.
+    const forwardPath = target.forwardUrl.split("?")[0] || "/";
+    if (target.viaPrefix && forwardPath === "/") {
+      res.writeHead(302, { Location: urlOnRequestOrigin(req.headers, "/hosts") });
+      res.end();
+      return true;
+    }
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Host is not online.\n");
     return true;
@@ -301,6 +309,30 @@ export async function proxyHostHttp(req: IncomingMessage, res: ServerResponse): 
     }
   }
   return true;
+}
+
+function handleHostListLive(
+  wss: WebSocketServer,
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+): void {
+  void clientIsAuthed(req).then((authed) => {
+    if (!authed) {
+      rejectSocket(socket, 401, "Unauthorized");
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (clientWs) => {
+      const sendList = (): void => {
+        if (clientWs.readyState === WebSocket.OPEN) {
+          clientWs.send(JSON.stringify({ hosts: listHosts() }));
+        }
+      };
+      const stop = onHostsChange(sendList);
+      clientWs.on("close", stop);
+      sendList();
+    });
+  });
 }
 
 function handleClientWsUpgrade(
@@ -380,6 +412,10 @@ export function attachTunnel(server: Server, fallbackUpgrade?: UpgradeHandler): 
     const pathname = pathnameOf(req);
     if (pathname === TUNNEL_PATH) {
       handleTunnelUpgrade(wss, req, socket, head);
+      return;
+    }
+    if (pathname === "/api/hosts/live") {
+      handleHostListLive(wss, req, socket, head);
       return;
     }
     if (targetOf(req)) {

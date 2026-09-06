@@ -9,6 +9,7 @@ import { isAuthedCookie, LOGIN_COOKIE, clearPickCookieHeader, loginFromEnv, pars
 import { listHosts } from "./hosts";
 import { originFromRequestHeaders, urlOnRequestOrigin } from "./request-origin";
 import { attachTunnel, proxyHostHttp } from "./tunnel";
+import { hostPickNextPath } from "./host-pick";
 import type { UpgradeHandler } from "./tunnel";
 
 const relayRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -122,6 +123,14 @@ async function gate(req: IncomingMessage, res: ServerResponse): Promise<boolean>
     if (pathname.startsWith("/api/")) {
       res.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ error: "Unauthorized" }));
+      return true;
+    }
+    const next = hostPickNextPath(pathname);
+    if (next && method === "GET") {
+      res.writeHead(302, {
+        Location: urlOnRequestOrigin(req.headers, `/?next=${encodeURIComponent(next)}`),
+      });
+      res.end();
       return true;
     }
     res.writeHead(401, { "Content-Type": "text/plain; charset=utf-8" });
