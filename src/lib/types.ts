@@ -75,6 +75,22 @@ export interface WorkspaceInfo {
   key: string;
 }
 
+/** Virtual listing of Windows drive letters (up from C:\). Not a filesystem path. */
+export const WINDOWS_DRIVES_LISTING = ":drives";
+
+export function isWindowsDrivesListing(path: string | null | undefined): boolean {
+  return path === WINDOWS_DRIVES_LISTING;
+}
+
+export type FsEntry = { name: string; path: string };
+
+export type FsListing = {
+  path: string;
+  parent: string | null;
+  startDirectory: string;
+  entries: FsEntry[];
+};
+
 export interface TerminalInfo {
   id: string;
   cwd: string;

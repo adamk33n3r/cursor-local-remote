@@ -3,16 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api-fetch";
 import { useHaptics } from "@/hooks/use-haptics";
+import { isWindowsDrivesListing, type FsListing } from "@/lib/types";
 import { ArrowUp, CloseIcon, PlusIcon, Spinner } from "./icons";
-
-type FsEntry = { name: string; path: string };
-
-type FsListing = {
-  path: string;
-  parent: string | null;
-  startDirectory: string;
-  entries: FsEntry[];
-};
 
 interface OpenWorkspaceBrowserProps {
   open: boolean;
@@ -57,11 +49,12 @@ export function OpenWorkspaceBrowser({ open, onClose, onOpen }: OpenWorkspaceBro
 
   if (!open) return null;
 
-  const canOpen = Boolean(listing?.path);
-  const canCreate = Boolean(listing?.path) && !creating;
+  const atDrives = isWindowsDrivesListing(listing?.path);
+  const canOpen = Boolean(listing?.path) && !atDrives;
+  const canCreate = Boolean(listing?.path) && !atDrives && !creating;
 
   const handleOpen = async () => {
-    if (!listing?.path) return;
+    if (!listing?.path || isWindowsDrivesListing(listing.path)) return;
     haptics.tap();
     setOpening(true);
     setError(null);
@@ -81,7 +74,7 @@ export function OpenWorkspaceBrowser({ open, onClose, onOpen }: OpenWorkspaceBro
   };
 
   const handleMkdir = async () => {
-    if (!listing?.path || !newName.trim()) return;
+    if (!listing?.path || isWindowsDrivesListing(listing.path) || !newName.trim()) return;
     haptics.tap();
     setError(null);
     try {
@@ -125,11 +118,11 @@ export function OpenWorkspaceBrowser({ open, onClose, onOpen }: OpenWorkspaceBro
         <div className="px-3 py-2 border-b border-border shrink-0 flex items-center gap-2">
           <button
             type="button"
-            disabled={listing?.parent === null || loading}
+            disabled={listing === null || listing.parent === null || loading}
             onClick={() => {
-              if (listing?.parent === null) return;
+              if (listing === null || listing.parent === null) return;
               haptics.tap();
-              void load(listing?.parent ?? "");
+              void load(listing.parent);
             }}
             aria-label="Go up"
             className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-secondary transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
@@ -137,7 +130,7 @@ export function OpenWorkspaceBrowser({ open, onClose, onOpen }: OpenWorkspaceBro
             <ArrowUp size={14} />
           </button>
           <p className="text-[11px] font-mono text-text-secondary truncate">
-            {listing?.path || (listing ? "Drives" : "")}
+            {listing ? (isWindowsDrivesListing(listing.path) ? "Drives" : listing.path) : ""}
           </p>
         </div>
 

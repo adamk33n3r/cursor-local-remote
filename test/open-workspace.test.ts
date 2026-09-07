@@ -8,6 +8,7 @@ import { GET as getFs, POST as postFs } from "../src/app/api/fs/route";
 import { GET as getInfo } from "../src/app/api/info/route";
 import { GET as getSessions } from "../src/app/api/sessions/route";
 import { GET as getGit } from "../src/app/api/git/route";
+import { WINDOWS_DRIVES_LISTING } from "../src/lib/types";
 
 const startDirectory = mkdtempSync(join(tmpdir(), "cr-open-ws-start-"));
 const nested = join(startDirectory, "nested");
@@ -58,10 +59,13 @@ test(
     const res = await getFs(new Request("http://host/api/fs?path=C%3A%5C"));
     assert.equal(res.status, 200);
     const body = await json(res);
-    assert.equal(body.parent, "");
-    const drives = await getFs(new Request("http://host/api/fs?path="));
+    assert.equal(body.parent, WINDOWS_DRIVES_LISTING);
+    const drives = await getFs(
+      new Request(`http://host/api/fs?path=${encodeURIComponent(WINDOWS_DRIVES_LISTING)}`),
+    );
     assert.equal(drives.status, 200);
     const driveBody = await json(drives);
+    assert.equal(driveBody.path, WINDOWS_DRIVES_LISTING);
     const entries = driveBody.entries as { name: string; path: string }[];
     assert.ok(entries.some((e) => e.path === "C:\\" || e.name === "C:"));
   },
@@ -98,7 +102,7 @@ test("New folder rejects a path that is not a single leaf name", async () => {
   assert.equal(names.includes("a"), false);
 });
 
-test("Open Workspace starts a Session at that path and leaves the process default Workspace unchanged", async () => {
+test("Open Workspace returns that path for the Session and leaves the process default Workspace unchanged", async () => {
   execFileSync("git", ["init", "-b", "open-ws-test"], { cwd: nested, stdio: "ignore" });
   execFileSync(
     "git",
@@ -149,7 +153,7 @@ test("Open Workspace starts a Session at that path and leaves the process defaul
   assert.equal(startGit.branch, null);
 });
 
-test("opening a file is a Session-start failure and does not roll back a folder already created", async () => {
+test("opening a file is not a directory and does not roll back a folder already created", async () => {
   const mkdirRes = await postFs(
     new Request("http://host/api/fs", {
       method: "POST",
@@ -168,7 +172,7 @@ test("opening a file is a Session-start failure and does not roll back a folder 
   );
   assert.equal(openRes.status, 400);
   const body = await json(openRes);
-  assert.equal(typeof body.error, "string");
+  assert.equal(body.error, "Not a directory");
 
   const listing = await json(await getFs(new Request("http://host/api/fs")));
   const names = (listing.entries as { name: string }[]).map((e) => e.name);

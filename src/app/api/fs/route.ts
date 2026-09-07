@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { getWorkspace } from "@/lib/workspace";
 import { badRequest, notFound, parseJsonBody, serverError } from "@/lib/errors";
 import { leafFolderName, listFilesystem } from "@/lib/fs-browser";
+import { isWindowsDrivesListing } from "@/lib/types";
 import { parseBody } from "@/lib/validation";
 import { z } from "zod";
 
@@ -55,6 +56,9 @@ export async function POST(req: Request) {
 }
 
 function mkdirLeaf(parentPath: string, name: string): Response {
+  if (isWindowsDrivesListing(parentPath)) {
+    return badRequest("Not a directory");
+  }
   const leaf = leafFolderName(name);
   if (!leaf) return badRequest("Folder name must be a single leaf in the current listing");
 
@@ -81,6 +85,9 @@ function mkdirLeaf(parentPath: string, name: string): Response {
 }
 
 function openWorkspace(path: string): Response {
+  if (isWindowsDrivesListing(path)) {
+    return badRequest("Not a directory");
+  }
   const resolved = resolve(path);
   try {
     const st = statSync(resolved);

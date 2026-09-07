@@ -1,17 +1,14 @@
 import { accessSync, readdirSync } from "node:fs";
 import { basename, dirname, parse, resolve, sep } from "node:path";
+import {
+  WINDOWS_DRIVES_LISTING,
+  isWindowsDrivesListing,
+  type FsEntry,
+  type FsListing,
+} from "@/lib/types";
 import { getWorkspace } from "@/lib/workspace";
 
-export type FsEntry = { name: string; path: string };
-
-export type FsListing = {
-  path: string;
-  parent: string | null;
-  startDirectory: string;
-  entries: FsEntry[];
-};
-
-const DRIVES_PATH = "";
+export type { FsEntry, FsListing };
 
 function isWindowsDriveRoot(resolvedPath: string): boolean {
   if (process.platform !== "win32") return false;
@@ -38,7 +35,7 @@ function windowsDrives(): FsEntry[] {
 
 function listingParent(resolvedPath: string): string | null {
   if (process.platform === "win32" && isWindowsDriveRoot(resolvedPath)) {
-    return DRIVES_PATH;
+    return WINDOWS_DRIVES_LISTING;
   }
   if (resolvedPath === "/" || resolvedPath === parse(resolvedPath).root) {
     return null;
@@ -49,11 +46,10 @@ function listingParent(resolvedPath: string): string | null {
 export function listFilesystem(pathParam: string | null): FsListing {
   const startDirectory = getWorkspace();
 
-  // Empty path is the Windows drive listing (up from C:\), not a jail root.
-  if (pathParam === DRIVES_PATH) {
+  if (isWindowsDrivesListing(pathParam)) {
     if (process.platform === "win32") {
       return {
-        path: DRIVES_PATH,
+        path: WINDOWS_DRIVES_LISTING,
         parent: null,
         startDirectory,
         entries: windowsDrives(),
