@@ -6,7 +6,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { isLanSourceIp } from "./source-ip";
 import { getOnlineHost, listHosts, markHostOffline, onHostsChange, putHost } from "./hosts";
 import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies, pickCookieHeader } from "./login";
-import { resolveHostProxy } from "./host-pick";
+import { isCookieLessHostAsset, resolveHostProxy } from "./host-pick";
 import { urlOnRequestOrigin } from "./request-origin";
 
 const TUNNEL_PATH = "/tunnel";
@@ -61,7 +61,13 @@ function pathnameOf(req: IncomingMessage): string {
 
 function targetOf(req: IncomingMessage) {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
-  return resolveHostProxy(url.pathname, url.search, req.headers.cookie);
+  const referer = req.headers.referer;
+  return resolveHostProxy(
+    url.pathname,
+    url.search,
+    req.headers.cookie,
+    Array.isArray(referer) ? referer[0] : referer,
+  );
 }
 
 function filterHeaders(headers: IncomingMessage["headers"] | HeaderMap): HeaderMap {
@@ -262,9 +268,12 @@ export async function proxyHostHttp(req: IncomingMessage, res: ServerResponse): 
   if (!target) return false;
 
   if (!(await clientIsAuthed(req))) {
-    res.writeHead(401, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end();
-    return true;
+    const forwardPath = target.forwardUrl.split("?")[0] || "/";
+    if (!isCookieLessHostAsset(forwardPath)) {
+      res.writeHead(401, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end();
+      return true;
+    }
   }
 
   const host = getOnlineHost(target.hostId);

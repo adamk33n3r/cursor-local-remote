@@ -157,6 +157,16 @@ function startStubHost(): Promise<{ port: number; close: () => Promise<void> }> 
       res.end(JSON.stringify({ workspace: "/stub-workspace", ok: true }));
       return;
     }
+    if (pathname === "/manifest.webmanifest") {
+      res.writeHead(200, { "Content-Type": "application/manifest+json; charset=utf-8" });
+      res.end(JSON.stringify({ name: "stub-host-manifest" }));
+      return;
+    }
+    if (pathname === "/icon-192.png") {
+      res.writeHead(200, { "Content-Type": "image/png" });
+      res.end("host-icon-192");
+      return;
+    }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end("<html><body>stub-host-ui</body></html>");
   });
@@ -402,6 +412,27 @@ describe("Host list then Host", { concurrency: false }, () => {
     });
     assert.equal(apiSticky.status, 200);
     assert.deepEqual(await apiSticky.json(), { workspace: "/stub-workspace", ok: true });
+
+    const referer = `http://127.0.0.1:${relayPort}/h/${hostId}/`;
+    const manifestNoCookie = await fetch(`http://127.0.0.1:${relayPort}/manifest.webmanifest`, {
+      headers: { referer },
+      signal: AbortSignal.timeout(10_000),
+    });
+    assert.equal(manifestNoCookie.status, 200);
+    assert.deepEqual(await manifestNoCookie.json(), { name: "stub-host-manifest" });
+
+    const iconNoCookie = await fetch(`http://127.0.0.1:${relayPort}/icon-192.png`, {
+      headers: { referer },
+      signal: AbortSignal.timeout(10_000),
+    });
+    assert.equal(iconNoCookie.status, 200);
+    assert.equal(await iconNoCookie.text(), "host-icon-192");
+
+    const apiNoCookie = await fetch(`http://127.0.0.1:${relayPort}/api/info`, {
+      headers: { referer },
+      signal: AbortSignal.timeout(10_000),
+    });
+    assert.equal(apiNoCookie.status, 401);
 
     const listRes = await fetch(`http://127.0.0.1:${relayPort}/hosts`, {
       headers: { cookie: sticky },

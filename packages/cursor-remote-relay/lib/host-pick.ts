@@ -44,10 +44,26 @@ export function isStickyHostPath(pathname: string): boolean {
   return /^\/[^/]+\.(png|ico|svg|webp|json|webmanifest|js)$/i.test(pathname);
 }
 
+/** rel=manifest (and its icons) are fetched without cookies. APIs and JS are not. */
+export function isCookieLessHostAsset(pathname: string): boolean {
+  return /^\/[^/]+\.(png|ico|svg|webp|webmanifest)$/i.test(pathname);
+}
+
+function hostIdFromReferer(referer: string | undefined): string | null {
+  if (!referer) return null;
+  try {
+    const parsed = parseHostPath(new URL(referer).pathname);
+    return parsed?.hostId ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function resolveHostProxy(
   pathname: string,
   search: string,
   cookieHeader: string | undefined,
+  referer?: string,
 ): HostProxyTarget | null {
   const prefixed = parseHostPath(pathname);
   if (prefixed) {
@@ -59,9 +75,11 @@ export function resolveHostProxy(
   }
   if (isRelayOwnedPath(pathname) || !isStickyHostPath(pathname)) return null;
   const pick = parseCookies(cookieHeader)[PICK_COOKIE];
-  if (!pick) return null;
+  // rel=manifest is fetched without cookies; the document URL is still /h/:id/.
+  const hostId = pick ? decodeURIComponent(pick) : hostIdFromReferer(referer);
+  if (!hostId) return null;
   return {
-    hostId: decodeURIComponent(pick),
+    hostId,
     forwardUrl: `${pathname}${search}`,
     viaPrefix: false,
   };

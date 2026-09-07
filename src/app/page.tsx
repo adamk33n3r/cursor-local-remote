@@ -7,6 +7,7 @@ export default async function Home() {
   const viaRelay = (await headers()).get(VIA_RELAY_HEADER) === VIA_RELAY_VALUE;
   return (
     <ErrorBoundary>
+      {/* After pick, Sessions starts open so this is clearly the Host, not another splash. */}
       <ChatWorkspace sidebarOpenInitially={viaRelay} />
     </ErrorBoundary>
   );
