@@ -6,6 +6,7 @@ import { useHaptics } from "@/hooks/use-haptics";
 import { apiFetch } from "@/lib/api-fetch";
 import { timeAgo } from "@/lib/format";
 import { sameWorkspacePath, workspacePathIdentity } from "@/lib/merge-known-workspaces.mjs";
+import { OpenWorkspaceBrowser } from "./open-workspace-browser";
 import { RefreshIcon, CloseIcon, PlusIcon, Spinner, TrashIcon, ChevronDown } from "./icons";
 
 interface SessionSidebarProps {
@@ -165,6 +166,7 @@ export function SessionSidebar({
   const [pathInsensitive, setPathInsensitive] = useState(false);
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const [starred, setStarred] = useState<string[]>([]);
+  const [browseOpen, setBrowseOpen] = useState(false);
   const haptics = useHaptics();
 
   useEffect(() => {
@@ -382,6 +384,15 @@ export function SessionSidebar({
             <PlusIcon />
             New session
           </button>
+          <button
+            onClick={() => {
+              haptics.tap();
+              setBrowseOpen(true);
+            }}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[12px] text-text-muted hover:text-text-secondary hover:bg-bg-hover transition-colors"
+          >
+            Open Workspace
+          </button>
 
           {starredPaths.length > 0 && (
             <div className="space-y-px">
@@ -596,6 +607,16 @@ export function SessionSidebar({
           )}
         </div>
       </div>
+      <OpenWorkspaceBrowser
+        open={browseOpen}
+        onClose={() => setBrowseOpen(false)}
+        onOpen={(workspace) => {
+          handleProjectSelect(workspace);
+          onNewSession(workspace);
+          setBrowseOpen(false);
+          onClose();
+        }}
+      />
     </>
   );
 }
