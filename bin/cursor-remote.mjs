@@ -160,7 +160,9 @@ if (args.includes("--help") || args.includes("-h")) {
     --config       JSON file with optional relay and name
     --no-open      Don't auto-open the browser
     --no-qr        Don't show QR code in terminal
-    --no-trust     Disable Workspace trust (Agent will ask before actions)
+    --force        Pass --force to Agent (Run Everything; deny still applies)
+    --no-force     Do not pass --force (Host settings toggle still applies)
+    --no-trust     Alias for --no-force
     -v, --verbose  Show all Host and Agent output
 
   Commands:
@@ -178,7 +180,7 @@ if (args.includes("--help") || args.includes("-h")) {
     cursor-remote --relay http://192.168.1.10:3200
     cursor-remote --name Study --relay http://192.168.1.10:3200
     cursor-remote --host 127.0.0.1         # Bind to localhost only
-    cursor-remote --no-trust               # Require Agent to ask before actions
+    cursor-remote --force                  # Run Everything for this Host process
     cursor-remote --status                 # Check for running Host instances
     cursor-remote --list                   # Show all known Workspaces
 `);
@@ -190,7 +192,7 @@ let rawPort = process.env.PORT || "3100";
 let noOpen = false;
 let noQr = false;
 let verbose = false;
-let trust = process.env.CURSOR_TRUST !== "0";
+let forceOverride = null;
 let customToken = null;
 let hostname = "0.0.0.0";
 let relayUrl = process.env.RELAY_URL || "";
@@ -217,10 +219,12 @@ for (let i = 0; i < args.length; i++) {
     noQr = true;
   } else if (a === "--verbose" || a === "-v") {
     verbose = true;
+  } else if (a === "--force" || a === "--yolo") {
+    forceOverride = true;
+  } else if (a === "--no-force" || a === "--no-trust") {
+    forceOverride = false;
   } else if (a === "--trust") {
-    trust = true;
-  } else if (a === "--no-trust") {
-    trust = false;
+    // Agent --trust is always passed; keep the flag so old invocations still parse.
   } else if (!a.startsWith("-")) {
     positional.push(a);
   }
@@ -359,19 +363,22 @@ function openBrowser() {
 const isBuilt = existsSync(resolve(projectRoot, ".next", "BUILD_ID"));
 const hostHttpArgs = isBuilt ? ["--start"] : [];
 
+const childEnv = {
+  ...process.env,
+  CURSOR_WORKSPACE: workspace,
+  PORT: port,
+  HOST: hostname,
+  AUTH_TOKEN: authToken,
+  CLR_VERBOSE: verbose ? "1" : "",
+  NODE_ENV: isBuilt ? "production" : process.env.NODE_ENV || "development",
+};
+delete childEnv.CURSOR_FORCE;
+if (forceOverride !== null) childEnv.CURSOR_FORCE = forceOverride ? "1" : "0";
+
 const child = spawn(process.execPath, [resolve(projectRoot, "bin/host-http.mjs"), ...hostHttpArgs], {
   cwd: projectRoot,
   stdio: ["inherit", "pipe", "pipe"],
-  env: {
-    ...process.env,
-    CURSOR_WORKSPACE: workspace,
-    CURSOR_TRUST: trust ? "1" : "",
-    PORT: port,
-    HOST: hostname,
-    AUTH_TOKEN: authToken,
-    CLR_VERBOSE: verbose ? "1" : "",
-    NODE_ENV: isBuilt ? "production" : process.env.NODE_ENV || "development",
-  },
+  env: childEnv,
 });
 
 let ready = false;

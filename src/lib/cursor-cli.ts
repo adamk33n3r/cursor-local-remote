@@ -27,18 +27,18 @@ export interface AgentOptions {
   mode?: AgentMode;
 }
 
-async function shouldTrust(): Promise<boolean> {
-  if (process.env.CURSOR_TRUST === "0") return false;
-  if (process.env.CURSOR_TRUST === "1") return true;
-  const val = await getConfig("trust");
-  return val !== "0";
+/** Host settings key `trust` and CURSOR_FORCE=1/0 control Agent `--force`. `--trust` is always passed. */
+export async function shouldForce(): Promise<boolean> {
+  if (process.env.CURSOR_FORCE === "0") return false;
+  if (process.env.CURSOR_FORCE === "1") return true;
+  return (await getConfig("trust")) === "1";
 }
 
 export async function spawnAgent(options: AgentOptions): Promise<ChildProcess> {
   const agent = agentLaunch();
   const args = [
     ...agent.prefixArgs,
-    ...buildAgentArgv(options, { trust: await shouldTrust() }),
+    ...buildAgentArgv(options, { force: await shouldForce() }),
   ];
 
   return spawn(agent.command, args, {

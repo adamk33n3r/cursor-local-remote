@@ -113,7 +113,8 @@ cursor-remote [workspace] [options]
 | `--host` | Bind to specific host/IP (default: `0.0.0.0`) |
 | `--no-open` | Don't auto-open the browser |
 | `--no-qr` | Don't show QR code in terminal |
-| `--no-trust` | Disable workspace trust (agent will ask before actions) |
+| `--force` | Pass `--force` to Agent for this Host process (Run Everything; deny still applies) |
+| `--no-force` | Do not pass `--force` (Host settings toggle still applies). `--no-trust` is an alias |
 | `-v, --verbose` | Show all server and agent output |
 | `-l, --list` | List known Workspaces |
 | `--status` | Check if a Host is already running |
@@ -180,7 +181,7 @@ All endpoints require a valid token (cookie or `Bearer` header).
 | --- | --- |
 | `AUTH_TOKEN` | Fixed auth token (otherwise randomly generated each launch) |
 | `CURSOR_WORKSPACE` | Workspace path (set automatically by the CLI) |
-| `CURSOR_TRUST` | Set to `1` to pass `--trust` to the agent (auto-approve all tool calls) |
+| `CURSOR_FORCE` | Set to `1` to pass `--force` to Agent; `0` to disable. If unset, the Host settings toggle is used |
 | `PORT` | Server port (default: `3100`) |
 
 ## Requirements

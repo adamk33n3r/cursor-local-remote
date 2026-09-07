@@ -9,11 +9,18 @@ export interface AgentArgvOptions {
   mode?: AgentMode;
 }
 
-export function buildAgentArgv(options: AgentArgvOptions, flags: { trust: boolean }): string[] {
-  const args = ["-p", options.prompt, "--output-format", "stream-json", "--stream-partial-output"];
+export function buildAgentArgv(options: AgentArgvOptions, flags: { force: boolean }): string[] {
+  const args = [
+    "-p",
+    options.prompt,
+    "--output-format",
+    "stream-json",
+    "--stream-partial-output",
+    "--trust",
+  ];
 
-  if (flags.trust) {
-    args.push("--trust");
+  if (flags.force) {
+    args.push("--force");
   }
   if (options.sessionId) {
     args.push("--resume", options.sessionId);

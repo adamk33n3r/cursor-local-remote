@@ -1,10 +1,9 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
 import type { ModelInfo } from "@/lib/types";
-import { agentExecFile } from "@/lib/cursor-cli";
+import { agentExecFile, shouldForce } from "@/lib/cursor-cli";
 import { serverError, safeErrorMessage } from "@/lib/errors";
 import { MODELS_CACHE_TTL_MS, MODELS_FETCH_TIMEOUT_MS } from "@/lib/constants";
-import { getConfig } from "@/lib/session-store";
 
 const execFileAsync = promisify(execFile);
 
@@ -48,10 +47,8 @@ export async function GET() {
       console.warn(`[models] fetching (timeout=${MODELS_FETCH_TIMEOUT_MS}ms)`);
     }
 
-    const agentArgs = ["models"];
-    const trustEnv = process.env.CURSOR_TRUST;
-    const trustConfig = trustEnv === "0" ? false : trustEnv === "1" ? true : (await getConfig("trust")) !== "0";
-    if (trustConfig) agentArgs.push("--trust");
+    const agentArgs = ["models", "--trust"];
+    if (await shouldForce()) agentArgs.push("--force");
 
     const agent = agentExecFile();
     const { stdout } = await execFileAsync(agent.command, [...agent.prefixArgs, ...agentArgs], {

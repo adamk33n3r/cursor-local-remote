@@ -10,7 +10,7 @@ export async function GET() {
   try {
     const raw = await getAllConfig();
     const settings: Record<string, boolean | string> = {
-      trust: true,
+      trust: false,
       sound: true,
       pwa_prompt: true,
       default_model: "auto",

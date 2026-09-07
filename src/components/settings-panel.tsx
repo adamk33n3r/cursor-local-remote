@@ -15,7 +15,7 @@ interface Settings {
 }
 
 const DEFAULTS: Settings = {
-  trust: true,
+  trust: false,
   sound: true,
   pwa_prompt: true,
   default_model: "auto",
@@ -24,8 +24,8 @@ const DEFAULTS: Settings = {
 
 const TOGGLE_LABELS: Record<"trust" | "sound" | "pwa_prompt", { label: string; description: string }> = {
   trust: {
-    label: "Workspace trust",
-    description: "Allow the agent to execute code and edit files without asking",
+    label: "Run Everything",
+    description: "Pass --force so Agent runs commands that are not on the allow list. Deny rules still apply.",
   },
   sound: {
     label: "Sound effects",
