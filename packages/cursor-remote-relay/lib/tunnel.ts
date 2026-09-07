@@ -70,6 +70,22 @@ function targetOf(req: IncomingMessage) {
   );
 }
 
+// Close events report 1005/1006; those codes are not legal in a close frame.
+function isSendableCloseCode(code: unknown): code is number {
+  return (
+    typeof code === "number" &&
+    Number.isInteger(code) &&
+    ((code >= 1000 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006) ||
+      (code >= 3000 && code <= 4999))
+  );
+}
+
+function closeSocket(socket: WebSocket, code?: number, reason?: string): void {
+  if (socket.readyState !== WebSocket.OPEN) return;
+  const text = typeof reason === "string" && Buffer.byteLength(reason) <= 123 ? reason : "";
+  socket.close(isSendableCloseCode(code) ? code : 1000, text);
+}
+
 function filterHeaders(headers: IncomingMessage["headers"] | HeaderMap): HeaderMap {
   const out: HeaderMap = {};
   for (const [key, value] of Object.entries(headers)) {
@@ -167,7 +183,7 @@ function onTunnelMessage(_hostId: string, socket: TunnelSocket, raw: WebSocket.R
     case "ws-close": {
       const waiter = pending.ws.get(msg.id);
       if (waiter?.client && waiter.client.readyState === WebSocket.OPEN) {
-        waiter.client.close(msg.code || 1000, msg.reason || "");
+        closeSocket(waiter.client, msg.code, msg.reason);
       }
       pending.ws.delete(msg.id);
       return;

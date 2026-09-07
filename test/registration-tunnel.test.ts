@@ -156,6 +156,10 @@ function startStubHost(): Promise<{ port: number; close: () => Promise<void> }> 
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.on("message", (data) => {
+        if (String(data) === "die") {
+          ws.terminate();
+          return;
+        }
         ws.send(data);
       });
     });
@@ -338,5 +342,89 @@ test("after Login and pick, Relay proxies Host HTTP and one WebSocket without a 
     ws.send("ping-over-tunnel");
   });
   assert.equal(echoed, "ping-over-tunnel");
+});
+
+test("reserved WebSocket close codes through the Tunnel leave Host HTTP working", async (t) => {
+  const relayPort = await freePort();
+  const proc = startRelay(
+    ["--port", String(relayPort), "--host", "127.0.0.1"],
+    relayEnv({ LOGIN_USERNAME: "relay-user", LOGIN_PASSWORD: "correct-horse" }),
+  );
+  t.after(() => stopRelay(proc));
+  await waitForStdout(proc, /Press Ctrl\+C to stop/, 60_000);
+
+  const stub = await startStubHost();
+  t.after(() => stub.close());
+
+  const hostId = "66666666-6666-4666-8666-666666666666";
+  const tunnel = await connectHostTunnel({
+    relayUrl: `http://127.0.0.1:${relayPort}`,
+    localOrigin: `http://127.0.0.1:${stub.port}`,
+    id: hostId,
+    name: "Laptop",
+  });
+  t.after(() => tunnel.close());
+
+  const cookie = await loginCookie(relayPort);
+  const headers = { cookie };
+
+  const ws = new WebSocket(`ws://127.0.0.1:${relayPort}/h/${hostId}/echo`, { headers });
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out opening proxied WebSocket")), 8_000);
+    ws.once("open", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    ws.once("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for Client terminate")), 8_000);
+    ws.once("close", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    ws.terminate();
+  });
+
+  const afterClientClose = await fetch(`http://127.0.0.1:${relayPort}/h/${hostId}/hello`, {
+    headers,
+    signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(afterClientClose.status, 200);
+  assert.equal(await afterClientClose.text(), "hello-from-host");
+
+  const ws2 = new WebSocket(`ws://127.0.0.1:${relayPort}/h/${hostId}/echo`, { headers });
+  t.after(() => {
+    if (ws2.readyState === WebSocket.OPEN || ws2.readyState === WebSocket.CONNECTING) ws2.terminate();
+  });
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out opening second proxied WebSocket")), 8_000);
+    ws2.once("open", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    ws2.once("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for Host-side terminate")), 8_000);
+    ws2.once("close", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    ws2.send("die");
+  });
+
+  const afterHostClose = await fetch(`http://127.0.0.1:${relayPort}/h/${hostId}/hello`, {
+    headers,
+    signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(afterHostClose.status, 200);
+  assert.equal(await afterHostClose.text(), "hello-from-host");
 });
 });
