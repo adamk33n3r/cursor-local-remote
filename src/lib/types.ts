@@ -21,6 +21,8 @@ export interface ToolCallInfo {
   args?: string;
   status: "running" | "completed" | "error";
   result?: string;
+  /** Full command/tool stdout (or stderr) shown when the card is expanded. */
+  output?: string;
   diff?: string;
   diffStartLine?: number;
   todos?: TodoItem[];

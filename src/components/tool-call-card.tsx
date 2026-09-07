@@ -188,7 +188,7 @@ function actionLabel(tc: ToolCallInfo): string {
     case "edit":
       return "Editing";
     case "shell":
-      return "Running";
+      return tc.status === "running" ? "Running" : "Ran";
     case "search":
       return "Searching";
     case "todo":
@@ -301,7 +301,7 @@ export function ToolCallCard({ toolCall, defaultExpanded }: ToolCallCardProps) {
         </span>
 
         {toolCall.result && (
-          <span className="text-text-muted text-[11px] shrink-0">{toolCall.result}</span>
+          <span className="text-text-muted text-[11px] shrink-0 max-w-[40%] truncate">{toolCall.result}</span>
         )}
 
         <ChevronDown className={`shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />
@@ -317,6 +317,16 @@ export function ToolCallCard({ toolCall, defaultExpanded }: ToolCallCardProps) {
             <pre className="bg-[#0d0d0d] rounded px-2 py-1.5 text-[11px] text-[#c9d1d9] whitespace-pre-wrap break-all">
               $ {toolCall.command}
             </pre>
+          )}
+
+          {toolCall.output && (
+            <pre className="bg-[#0d0d0d] rounded px-2 py-1.5 text-[11px] text-[#c9d1d9] whitespace-pre-wrap break-all max-h-[300px] overflow-y-auto">
+              {toolCall.output}
+            </pre>
+          )}
+
+          {toolCall.type === "shell" && !toolCall.output && !isRunning && toolCall.result && (
+            <p className="text-text-muted">no output</p>
           )}
 
           {toolCall.type === "search" && toolCall.command && (
@@ -346,7 +356,7 @@ export function ToolCallCard({ toolCall, defaultExpanded }: ToolCallCardProps) {
 
           {toolCall.diff && <DiffBlock diff={toolCall.diff} startLine={toolCall.diffStartLine} />}
 
-          {!toolCall.diff && !toolCall.todos && toolCall.result && (
+          {!toolCall.diff && !toolCall.todos && !toolCall.output && toolCall.result && (
             <p className="text-text-secondary">{toolCall.result}</p>
           )}
 

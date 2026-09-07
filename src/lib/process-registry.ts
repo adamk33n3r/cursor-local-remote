@@ -1,5 +1,6 @@
 import type { ChildProcess } from "child_process";
 import { LIVE_EVENT_TTL_MS } from "@/lib/constants";
+import { appendToolCallEvent } from "@/lib/tool-call-events";
 
 type ProcessExitHook = (sessionId: string, workspace: string) => void;
 
@@ -73,7 +74,7 @@ export function onLiveUpdate(sessionId: string, cb: () => void): () => void {
 
 function isLiveTranscriptEvent(event: Record<string, unknown>): boolean {
   const type = event.type;
-  return type === "user" || type === "assistant" || type === "thinking";
+  return type === "user" || type === "assistant" || type === "thinking" || type === "tool_call";
 }
 
 function attachStdoutLiveFeed(entry: RunningProcess): void {
@@ -90,6 +91,16 @@ function attachStdoutLiveFeed(entry: RunningProcess): void {
         const event = JSON.parse(trimmed) as Record<string, unknown>;
         if (isLiveTranscriptEvent(event)) {
           pushLiveEvent(sid, event);
+          if (event.type === "tool_call") {
+            const persistId = typeof event.session_id === "string" && event.session_id
+              ? event.session_id
+              : sid;
+            try {
+              appendToolCallEvent(persistId, event);
+            } catch {
+              // disk full / permission — still keep the live event
+            }
+          }
         }
       } catch {
         // non-json line

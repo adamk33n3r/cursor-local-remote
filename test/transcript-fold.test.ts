@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { foldSameRoleText, parseLiveEvents } from "../src/lib/transcript-reader";
+import { foldSameRoleText, overlayToolCallResults, parseLiveEvents } from "../src/lib/transcript-reader";
 import { displayTranscriptText, normalizeUserPrompt } from "../src/lib/transcript-text";
 
 test("foldSameRoleText keeps a growing snapshot instead of concatenating", () => {
@@ -48,6 +48,184 @@ test("parseLiveEvents does not double a repeated assistant snapshot", () => {
   );
   assert.equal(messages.length, 1);
   assert.equal(messages[0]?.content, "pong");
+});
+
+test("parseLiveEvents attaches shell stdout from tool_call completed events", () => {
+  const { toolCalls } = parseLiveEvents(
+    [
+      {
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "Shell",
+              input: { command: "gh repo view adamk33n3r/cursor-local-remote" },
+            },
+          ],
+        },
+      },
+      {
+        type: "tool_call",
+        subtype: "started",
+        call_id: "toolu_shell_1",
+        tool_call: {
+          shellToolCall: {
+            args: { command: "gh repo view adamk33n3r/cursor-local-remote" },
+          },
+        },
+      },
+      {
+        type: "tool_call",
+        subtype: "completed",
+        call_id: "toolu_shell_1",
+        tool_call: {
+          shellToolCall: {
+            args: { command: "gh repo view adamk33n3r/cursor-local-remote" },
+            result: {
+              success: {
+                command: "gh repo view adamk33n3r/cursor-local-remote",
+                exitCode: 0,
+                stdout: "name: cursor-local-remote\ndescription: Host + Relay",
+                stderr: "",
+              },
+            },
+          },
+        },
+      },
+    ],
+    "sess",
+  );
+  assert.equal(toolCalls.length, 1);
+  assert.equal(toolCalls[0]?.type, "shell");
+  assert.equal(toolCalls[0]?.command, "gh repo view adamk33n3r/cursor-local-remote");
+  assert.equal(toolCalls[0]?.status, "completed");
+  assert.equal(toolCalls[0]?.output, "name: cursor-local-remote\ndescription: Host + Relay");
+  assert.equal(toolCalls[0]?.result, "exit 0 · 2 lines");
+});
+
+test("parseLiveEvents keeps a running shell tool until it completes", () => {
+  const { toolCalls } = parseLiveEvents(
+    [
+      {
+        type: "tool_call",
+        subtype: "started",
+        call_id: "toolu_shell_2",
+        tool_call: { shellToolCall: { args: { command: "sleep 5" } } },
+      },
+    ],
+    "sess",
+  );
+  assert.equal(toolCalls.length, 1);
+  assert.equal(toolCalls[0]?.status, "running");
+  assert.equal(toolCalls[0]?.command, "sleep 5");
+  assert.equal(toolCalls[0]?.output, undefined);
+});
+
+test("overlayToolCallResults copies stream output onto jsonl shell tools", () => {
+  const overlaid = overlayToolCallResults(
+    [
+      {
+        id: "file-1",
+        callId: "file-1",
+        type: "shell",
+        name: "Shell",
+        command: "gh repo view adamk33n3r/cursor-local-remote",
+        status: "completed",
+        timestamp: 1,
+      },
+    ],
+    [
+      {
+        id: "toolu_shell_1",
+        callId: "toolu_shell_1",
+        type: "shell",
+        name: "shellToolCall",
+        command: "gh repo view adamk33n3r/cursor-local-remote",
+        status: "completed",
+        result: "exit 0 · 1 line",
+        output: "name: cursor-local-remote",
+        timestamp: 2,
+      },
+    ],
+  );
+  assert.equal(overlaid.length, 1);
+  assert.equal(overlaid[0]?.id, "file-1");
+  assert.equal(overlaid[0]?.output, "name: cursor-local-remote");
+  assert.equal(overlaid[0]?.result, "exit 0 · 1 line");
+});
+
+test("overlayToolCallResults attaches stream output to the latest matching shell", () => {
+  const overlaid = overlayToolCallResults(
+    [
+      {
+        id: "file-1",
+        callId: "file-1",
+        type: "shell",
+        name: "Shell",
+        command: "gh repo view adamk33n3r/cooking-game --json name,visibility,isEmpty,defaultBranchRef,url",
+        status: "completed",
+        timestamp: 1,
+      },
+      {
+        id: "file-2",
+        callId: "file-2",
+        type: "shell",
+        name: "Shell",
+        command: "gh repo view adamk33n3r/cooking-game --json name,visibility,isEmpty,defaultBranchRef,url",
+        status: "completed",
+        timestamp: 2,
+      },
+    ],
+    [
+      {
+        id: "tool_latest",
+        callId: "tool_latest",
+        type: "shell",
+        name: "Shell",
+        command: "gh repo view adamk33n3r/cooking-game --json name,visibility,isEmpty,defaultBranchRef,url",
+        status: "completed",
+        result: "exit 0 · 1 line",
+        output: "{\"name\":\"cooking-game\",\"visibility\":\"PRIVATE\"}",
+        timestamp: 3,
+      },
+    ],
+  );
+  assert.equal(overlaid.length, 2);
+  assert.equal(overlaid[0]?.output, undefined);
+  assert.equal(overlaid[1]?.output, "{\"name\":\"cooking-game\",\"visibility\":\"PRIVATE\"}");
+});
+
+test("parseLiveEvents keeps a final assistant snapshot instead of concatenating deltas", () => {
+  const { messages } = parseLiveEvents(
+    [
+      {
+        type: "assistant",
+        timestamp_ms: 1,
+        message: { content: [{ type: "text", text: "```json\n{\"name\":\"cooking-game\"}" }] },
+      },
+      {
+        type: "assistant",
+        timestamp_ms: 2,
+        message: { content: [{ type: "text", text: "\n```\n\nStill empty, private, and with no default branch set." }] },
+      },
+      {
+        type: "assistant",
+        message: {
+          content: [{
+            type: "text",
+            text: "```json\n{\"name\":\"cooking-game\"}\n```\n\nStill empty, private, and with no default branch set.",
+          }],
+        },
+      },
+    ],
+    "sess",
+  );
+  assert.equal(messages.length, 1);
+  assert.equal(
+    messages[0]?.content,
+    "```json\n{\"name\":\"cooking-game\"}\n```\n\nStill empty, private, and with no default branch set.",
+  );
 });
 
 test("parseLiveEvents strips [REDACTED] from assistant text", () => {

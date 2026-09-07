@@ -26,6 +26,7 @@ import {
   getSessionModifiedAt,
   foldSameRoleText,
   parseLiveEvents,
+  overlayToolCallResults,
   readSessionMessages,
   resolveJsonlPath,
 } from "@/lib/transcript-reader";
@@ -124,13 +125,7 @@ function mergeTranscript(
     seen.add(key);
     messages.push(message);
   }
-  const toolSeen = new Set(fromFile.toolCalls.map((t) => t.id));
-  const toolCalls = [...fromFile.toolCalls];
-  for (const call of fromLive.toolCalls) {
-    if (toolSeen.has(call.id)) continue;
-    toolSeen.add(call.id);
-    toolCalls.push(call);
-  }
+  const toolCalls = overlayToolCallResults(fromFile.toolCalls, fromLive.toolCalls);
   return { messages, toolCalls };
 }
 
@@ -302,10 +297,12 @@ async function attachWatchSocket(ws: WebSocket, req: IncomingMessage): Promise<v
       vlog("watch", "process exit detected", sessionId);
       await new Promise((r) => setTimeout(r, PROCESS_EXIT_SETTLE_MS));
       try {
-        const { messages, toolCalls, modifiedAt } = await readSessionMessages(workspace, sessionId);
-        if (modifiedAt > lastSentModified) lastSentModified = modifiedAt;
-        vlog("watch", "sending final update after exit", { sessionId, messages: messages.length, toolCalls: toolCalls.length, modifiedAt });
-        sendEvent(ws, "update", { messages, toolCalls, modifiedAt, isActive: false });
+        const fromFile = await readSessionMessages(workspace, sessionId);
+        const live = parseLiveEvents(getLiveEvents(sessionId), sessionId);
+        const merged = mergeTranscript(fromFile, live);
+        if (fromFile.modifiedAt > lastSentModified) lastSentModified = fromFile.modifiedAt;
+        vlog("watch", "sending final update after exit", { sessionId, messages: merged.messages.length, toolCalls: merged.toolCalls.length, modifiedAt: fromFile.modifiedAt });
+        sendEvent(ws, "update", { messages: merged.messages, toolCalls: merged.toolCalls, modifiedAt: Math.max(fromFile.modifiedAt, Date.now()), isActive: false });
       } catch (err) {
         vlog("watch", "exit read failed, falling back to live events", sessionId, String(err));
         const events = getLiveEvents(sessionId);
