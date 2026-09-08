@@ -131,6 +131,23 @@ export function forgetHost(id: string): ForgetResult {
   return "forgotten";
 }
 
+export function forgetHttp(
+  result: ForgetResult,
+): { status: 204 } | { status: 409; body: string } | { status: 404; body: string } {
+  switch (result) {
+    case "forgotten":
+      return { status: 204 };
+    case "online":
+      return { status: 409, body: "Forget is only for offline Hosts.\n" };
+    case "missing":
+      return { status: 404, body: "Host is not on the Host list.\n" };
+    default: {
+      const _exhaustive: never = result;
+      return _exhaustive;
+    }
+  }
+}
+
 export function getOnlineHost(id: string): HostRecord | null {
   const row = registry().get(id);
   if (!row?.online || !row.socket) return null;

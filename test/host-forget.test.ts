@@ -484,7 +484,7 @@ describe("Forget, persist, drop, reconnect", { concurrency: false }, () => {
     assert.equal(stickyApi.status, 410);
   });
 
-  test("Direct LAN to that Host is unchanged by Tunnel drop", async (t) => {
+  test("Direct LAN to that Host is unchanged by Forget or Tunnel drop", async (t) => {
     const stateDir = mkdtempSync(join(tmpdir(), "cr-host-forget-lan-"));
     t.after(() => rmSync(stateDir, { recursive: true, force: true }));
     const relayPort = await freePort();
@@ -529,6 +529,9 @@ describe("Forget, persist, drop, reconnect", { concurrency: false }, () => {
       await new Promise((r) => setTimeout(r, 200));
     }
     assert.ok(appeared, "Host never appeared on the Host list");
+
+    const hosts = await listHosts(relayPort, cookie);
+    assert.equal((await forgetHostRow(relayPort, cookie, hosts[0].id)).status, 409);
 
     const before = await fetch(`http://127.0.0.1:${hostPort}/`, {
       headers: { Authorization: "Bearer lan-token" },

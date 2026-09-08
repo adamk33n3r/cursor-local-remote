@@ -7,8 +7,9 @@ function pickedHostId(): string | null {
   if (!match) return null;
   try {
     return decodeURIComponent(match[1]);
-  } catch {
-    return match[1];
+  } catch (err) {
+    console.error("Host pick path is not a valid Host id", err);
+    return null;
   }
 }
 
@@ -29,8 +30,8 @@ export function RelayChrome() {
         if (!body.hosts.some((row) => row.id === hostId)) {
           window.location.replace("/hosts");
         }
-      } catch {
-        // live payload is not a Host list snapshot
+      } catch (err) {
+        console.error("Host list live snapshot was not JSON", err);
       }
     };
     return () => {

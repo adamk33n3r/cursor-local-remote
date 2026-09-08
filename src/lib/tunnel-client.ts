@@ -18,9 +18,10 @@ export type ConnectHostTunnelOpts = {
   log?: (message: string) => void;
 };
 
-// Keep retrying after the Relay process dies; 3s is frequent enough to
-// come back with the Host list without hammering a down listener.
+// Keep retrying after the Relay process dies. Start at 3s and double up to
+// 30s so a down listener is not hammered and a brief outage still comes back.
 const DEFAULT_RECONNECT_MS = 3_000;
+const MAX_RECONNECT_MS = 30_000;
 
 type TunnelHttpRequest = {
   type: "http-request";
@@ -157,6 +158,7 @@ export function connectHostTunnel(opts: ConnectHostTunnelOpts): Promise<HostTunn
   let everRegistered = false;
   let outageAnnounced = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectDelayMs = reconnectMs;
   let ws: WebSocket | null = null;
   let readySettled = false;
   let resolveReady: (handle: HostTunnel) => void = () => undefined;
@@ -264,11 +266,13 @@ export function connectHostTunnel(opts: ConnectHostTunnelOpts): Promise<HostTunn
   function scheduleReconnect(): void {
     if (stopped || reconnectTimer) return;
     announceOutage();
+    const waitMs = reconnectDelayMs;
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, MAX_RECONNECT_MS);
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       if (stopped) return;
       openSocket();
-    }, reconnectMs);
+    }, waitMs);
   }
 
   function openSocket(): void {
@@ -295,6 +299,7 @@ export function connectHostTunnel(opts: ConnectHostTunnelOpts): Promise<HostTunn
           everRegistered = true;
           if (wasReconnect) log("  Reconnected to Relay");
           outageAnnounced = false;
+          reconnectDelayMs = reconnectMs;
           if (!readySettled) {
             readySettled = true;
             resolveReady(handle);
