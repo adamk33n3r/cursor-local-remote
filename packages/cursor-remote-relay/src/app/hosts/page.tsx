@@ -38,6 +38,13 @@ export default function HostsPage() {
     };
   }, []);
 
+  async function forget(id: string): Promise<void> {
+    const res = await fetch(`/api/hosts/${encodeURIComponent(id)}/forget`, { method: "POST" });
+    if (!res.ok && res.status !== 204) {
+      setError(await res.text());
+    }
+  }
+
   const rows = hosts ?? [];
   const online = rows.filter((h) => h.online);
   const offline = rows.filter((h) => !h.online);
@@ -82,8 +89,20 @@ export default function HostsPage() {
               data-host-id={host.id}
               data-online="false"
             >
-              <span className="text-lg font-medium">{host.name}</span>
-              <span className="mt-1 block text-sm">Offline</span>
+              <div className="flex items-center justify-between gap-3">
+                <span>
+                  <span className="text-lg font-medium">{host.name}</span>
+                  <span className="mt-1 block text-sm">Offline</span>
+                </span>
+                <button
+                  type="button"
+                  className="text-sm text-text-muted"
+                  data-forget
+                  onClick={() => void forget(host.id)}
+                >
+                  Forget
+                </button>
+              </div>
             </li>
           ))}
         </ul>

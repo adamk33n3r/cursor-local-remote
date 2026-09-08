@@ -34,6 +34,9 @@ async function attempt(input: string, init: ApiFetchOptions, retriesLeft: number
     });
 
     if (!res.ok) {
+      if (res.status === 410 && typeof window !== "undefined") {
+        window.location.replace("/hosts");
+      }
       if (retriesLeft > 0 && RETRYABLE_STATUSES.has(res.status)) {
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
         return attempt(input, init, retriesLeft - 1);

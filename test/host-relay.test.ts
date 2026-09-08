@@ -104,7 +104,12 @@ function cleanEnv(overrides: Record<string, string | undefined> = {}): NodeJS.Pr
   delete env.HOST;
   delete env.AUTH_TOKEN;
   delete env.RELAY_URL;
-  return { ...env, ...overrides };
+  delete env.CURSOR_REMOTE_RELAY_STATE_DIR;
+  return {
+    ...env,
+    CURSOR_REMOTE_RELAY_STATE_DIR: mkdtempSync(join(tmpdir(), "cr-relay-state-")),
+    ...overrides,
+  };
 }
 
 async function loginCookie(relayPort: number): Promise<string> {

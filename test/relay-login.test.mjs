@@ -32,7 +32,12 @@ function relayEnv(overrides = {}) {
   delete env.LOGIN_PASSWORD;
   delete env.PORT;
   delete env.HOST;
-  return { ...env, ...overrides };
+  delete env.CURSOR_REMOTE_RELAY_STATE_DIR;
+  return {
+    ...env,
+    CURSOR_REMOTE_RELAY_STATE_DIR: mkdtempSync(join(tmpdir(), "cr-relay-state-")),
+    ...overrides,
+  };
 }
 
 /**

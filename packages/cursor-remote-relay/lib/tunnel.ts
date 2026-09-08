@@ -4,7 +4,7 @@ import type { Duplex } from "node:stream";
 import { Buffer } from "node:buffer";
 import { WebSocket, WebSocketServer } from "ws";
 import { isLanSourceIp } from "./source-ip";
-import { getOnlineHost, listHosts, markHostOffline, onHostsChange, putHost } from "./hosts";
+import { getHost, getOnlineHost, listHosts, markHostOffline, onHostsChange, putHost } from "./hosts";
 import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies, pickCookieHeader } from "./login";
 import { isCookieLessHostAsset, resolveHostProxy } from "./host-pick";
 import { urlOnRequestOrigin } from "./request-origin";
@@ -195,17 +195,38 @@ function onTunnelMessage(_hostId: string, socket: TunnelSocket, raw: WebSocket.R
   }
 }
 
+function failPending(socket: TunnelSocket, reason: string): void {
+  const pending = socket.__relayPending;
+  if (!pending) return;
+  const body = Buffer.from(reason).toString("base64");
+  for (const [id, waiter] of pending.http) {
+    pending.http.delete(id);
+    waiter.resolve({
+      type: "http-response",
+      id,
+      status: 502,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+      body,
+    });
+  }
+  for (const [id, waiter] of pending.ws) {
+    pending.ws.delete(id);
+    if (waiter.client && waiter.client.readyState === WebSocket.OPEN) {
+      closeSocket(waiter.client, 1011, reason);
+    }
+  }
+}
+
 function attachHostSocket(id: string, name: string, socket: TunnelSocket): void {
   putHost(id, name, socket);
   socket.on("message", (raw) => onTunnelMessage(id, socket, raw));
-  socket.on("close", () => {
+  const drop = (): void => {
+    failPending(socket, "Tunnel dropped.\n");
     const row = getOnlineHost(id);
     if (row?.socket === socket) markHostOffline(id);
-  });
-  socket.on("error", () => {
-    const row = getOnlineHost(id);
-    if (row?.socket === socket) markHostOffline(id);
-  });
+  };
+  socket.on("close", drop);
+  socket.on("error", drop);
 }
 
 function handleTunnelUpgrade(
@@ -301,7 +322,14 @@ export async function proxyHostHttp(req: IncomingMessage, res: ServerResponse): 
       res.end();
       return true;
     }
-    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    // Forgotten (or never listed): do not retry that Host path. Offline-but-listed
+    // is retryable so a tunneled Client can come back when the Tunnel reconnects.
+    if (!getHost(target.hostId)) {
+      res.writeHead(410, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Host is not on the Host list.\n");
+      return true;
+    }
+    res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Host is not online.\n");
     return true;
   }
@@ -373,7 +401,11 @@ function handleClientWsUpgrade(
   }
   const host = getOnlineHost(target.hostId);
   if (!host?.socket) {
-    rejectSocket(socket, 404, "Not Found");
+    if (!getHost(target.hostId)) {
+      rejectSocket(socket, 410, "Gone");
+      return;
+    }
+    rejectSocket(socket, 502, "Bad Gateway");
     return;
   }
   const hostSocket = host.socket;

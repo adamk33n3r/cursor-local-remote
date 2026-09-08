@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { parse } from "node:url";
 import next from "next";
 import { isAuthedCookie, LOGIN_COOKIE, clearPickCookieHeader, loginFromEnv, parseCookies, PICK_COOKIE } from "./login";
-import { listHosts } from "./hosts";
+import { forgetHost, listHosts } from "./hosts";
 import { originFromRequestHeaders, urlOnRequestOrigin } from "./request-origin";
 import { attachTunnel, proxyHostHttp } from "./tunnel";
 import { hostPickNextPath } from "./host-pick";
@@ -142,6 +142,31 @@ async function gate(req: IncomingMessage, res: ServerResponse): Promise<boolean>
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ hosts: listHosts() }));
     return true;
+  }
+  if (authed && method === "POST") {
+    const forgetMatch = /^\/api\/hosts\/([^/]+)\/forget$/.exec(pathname);
+    if (forgetMatch) {
+      const hostId = decodeURIComponent(forgetMatch[1]);
+      const result = forgetHost(hostId);
+      if (result === "online") {
+        res.writeHead(409, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Forget is only for offline Hosts.\n");
+        return true;
+      }
+      if (result === "missing") {
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Host is not on the Host list.\n");
+        return true;
+      }
+      const pick = parseCookies(req.headers.cookie)[PICK_COOKIE];
+      if (pick && decodeURIComponent(pick) === hostId) {
+        res.writeHead(204, { "Set-Cookie": clearPickCookieHeader() });
+      } else {
+        res.writeHead(204);
+      }
+      res.end();
+      return true;
+    }
   }
   return false;
 }
