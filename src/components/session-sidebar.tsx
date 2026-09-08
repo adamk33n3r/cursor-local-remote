@@ -6,6 +6,7 @@ import { useHaptics } from "@/hooks/use-haptics";
 import { apiFetch } from "@/lib/api-fetch";
 import { timeAgo } from "@/lib/format";
 import { sameWorkspacePath, workspacePathIdentity } from "@/lib/merge-known-workspaces.mjs";
+import { resolveSelectedWorkspace, sessionsListSearch, WORKSPACE_STORAGE_KEY } from "@/lib/workspace-preference";
 import { OpenWorkspaceBrowser } from "./open-workspace-browser";
 import { RefreshIcon, CloseIcon, PlusIcon, Spinner, TrashIcon, ChevronDown } from "./icons";
 
@@ -71,7 +72,6 @@ function UnarchiveIcon({ size = 12, className = "" }: { size?: number; className
   );
 }
 
-const PROJECT_STORAGE_KEY = "clr-selected-project";
 const STARRED_STORAGE_KEY = "clr-starred-projects"; // localStorage fallback key
 
 function StarIcon({ size = 12, filled = false, className = "" }: { size?: number; filled?: boolean; className?: string }) {
@@ -169,10 +169,13 @@ export function SessionSidebar({
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const [starred, setStarred] = useState<string[]>([]);
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [sessionsFilterReady, setSessionsFilterReady] = useState(false);
   const haptics = useHaptics();
+  const currentWorkspaceRef = useRef(currentWorkspace);
+  currentWorkspaceRef.current = currentWorkspace;
 
   useEffect(() => {
-    const stored = localStorage.getItem(PROJECT_STORAGE_KEY);
+    const stored = localStorage.getItem(WORKSPACE_STORAGE_KEY);
     const localStars = loadStarredLocal();
     setSelectedProject(stored); // eslint-disable-line react-hooks/set-state-in-effect
     setStarred(localStars); // eslint-disable-line react-hooks/set-state-in-effect
@@ -209,66 +212,71 @@ export function SessionSidebar({
   }, [pathInsensitive]);
 
   const fetchProjects = useCallback(() => {
-    apiFetch("/api/projects")
+    return apiFetch("/api/projects")
       .then((r) => r.json())
       .then((data) => {
         const list: WorkspaceInfo[] = [...(data.workspaces || data.projects || [])];
         const insensitive = Boolean(data.pathInsensitive);
+        const stored = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+        const resolved = resolveSelectedWorkspace(
+          stored,
+          list,
+          data.currentWorkspace || "",
+          insensitive,
+        );
+        const activeWorkspace = currentWorkspaceRef.current;
         if (
-          currentWorkspace
-          && !list.some((w) => sameWorkspacePath(w.path, currentWorkspace, insensitive))
+          activeWorkspace
+          && !list.some((w) => sameWorkspacePath(w.path, activeWorkspace, insensitive))
         ) {
-          const name = currentWorkspace.split(/[/\\]/).filter(Boolean).pop() || currentWorkspace;
-          list.push({ name, path: currentWorkspace, key: name });
+          const name = activeWorkspace.split(/[/\\]/).filter(Boolean).pop() || activeWorkspace;
+          list.push({ name, path: activeWorkspace, key: name });
         }
         setWorkspaces(list);
         setPathInsensitive(insensitive);
-        // selectedProject starts null (localStorage is read in an effect to avoid SSR
-        // mismatch). This fetch often returns first with that null closure, so treat
-        // storage as the preference — otherwise Start directory overwrites cooking-game.
-        const stored = localStorage.getItem(PROJECT_STORAGE_KEY);
-        const preference = selectedProject ?? stored;
-        if (preference && preference !== "__all__") {
-          const match = list.find((w) => sameWorkspacePath(w.path, preference, insensitive));
-          if (match && match.path !== preference) {
-            setSelectedProject(match.path);
-            localStorage.setItem(PROJECT_STORAGE_KEY, match.path);
-          } else if (!selectedProject) {
-            setSelectedProject(preference);
+        setSelectedProject((prev) => (prev === resolved ? prev : resolved));
+        setSessionsFilterReady(true);
+        if (resolved !== "__all__" && resolved) {
+          if (!stored || !sameWorkspacePath(stored, resolved, insensitive)) {
+            localStorage.setItem(WORKSPACE_STORAGE_KEY, resolved);
           }
-        } else if (preference === "__all__" && !selectedProject) {
-          setSelectedProject("__all__");
-        } else if (!preference && !currentWorkspace && data.currentWorkspace) {
-          setSelectedProject(data.currentWorkspace);
-          localStorage.setItem(PROJECT_STORAGE_KEY, data.currentWorkspace);
+          const startDirectory = data.currentWorkspace || "";
+          if (
+            activeWorkspace
+            && startDirectory
+            && sameWorkspacePath(activeWorkspace, startDirectory, insensitive)
+            && !sameWorkspacePath(activeWorkspace, resolved, insensitive)
+          ) {
+            onWorkspaceChange?.(resolved);
+          }
         }
       })
-      .catch(() => {});
-  }, [selectedProject, currentWorkspace]);
+      .catch(() => {
+        const stored = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+        if (stored) {
+          setSelectedProject((prev) => (prev === stored ? prev : stored));
+          setSessionsFilterReady(true);
+        }
+      });
+  }, [onWorkspaceChange]);
 
   useEffect(() => {
     if (!currentWorkspace) return;
     setSelectedProject((prev) => {
       if (prev === "__all__") return prev;
       if (prev && sameWorkspacePath(prev, currentWorkspace, pathInsensitive)) return prev;
-      localStorage.setItem(PROJECT_STORAGE_KEY, currentWorkspace);
+      // Keep a stored/dropdown pick. Start directory arriving via /api/info must not clobber it.
+      if (prev) return prev;
+      localStorage.setItem(WORKSPACE_STORAGE_KEY, currentWorkspace);
       return currentWorkspace;
     });
   }, [currentWorkspace, pathInsensitive]);
 
   const fetchSessions = useCallback(() => {
+    const qs = sessionsListSearch(selectedProject, showArchived);
+    if (qs == null) return Promise.resolve();
     setFetchError(null);
-    const params = new URLSearchParams();
-    if (selectedProject === "__all__") {
-      params.set("all", "true");
-    } else if (selectedProject) {
-      params.set("workspace", selectedProject);
-    }
-    if (showArchived) {
-      params.set("archived", "true");
-    }
-    const qs = params.toString();
-    return apiFetch("/api/sessions" + (qs ? "?" + qs : ""))
+    return apiFetch("/api/sessions?" + qs)
       .then((r) => r.json())
       .then((data) => setSessions(data.sessions || []))
       .catch(() => setFetchError("Failed to load sessions"));
@@ -276,21 +284,26 @@ export function SessionSidebar({
 
   useEffect(() => {
     if (!open) return;
+    void fetchProjects();
+  }, [open, fetchProjects]);
+
+  useEffect(() => {
+    if (!open || !sessionsFilterReady) return;
+    if (sessionsListSearch(selectedProject, showArchived) == null) return;
     let cancelled = false;
     setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect -- loading state for fetch
     setConfirmingDelete(null);
-    fetchProjects();
     fetchSessions().finally(() => {
       if (!cancelled) setLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [open, fetchSessions, fetchProjects]);
+  }, [open, sessionsFilterReady, selectedProject, showArchived, fetchSessions]);
 
   const handleProjectSelect = useCallback((path: string) => {
     setSelectedProject(path);
-    localStorage.setItem(PROJECT_STORAGE_KEY, path);
+    localStorage.setItem(WORKSPACE_STORAGE_KEY, path);
     setProjectDropdownOpen(false);
     if (path !== "__all__") {
       onWorkspaceChange?.(path);

@@ -41,7 +41,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node --test test/host-cli.test.mjs test/relay-package.test.mjs test/relay-login.test.mjs test/workspace-list.test.mjs test/cursor-project-cache.test.mjs && tsx --test --test-concurrency=1 --test-reporter=spec test/live-streams.test.ts test/agent-bin.test.ts test/agent-spawn.test.ts test/lan-ip.test.ts test/project-key.test.ts test/transcript-fold.test.ts test/session-hash.test.ts test/source-ip.test.ts test/request-origin.test.ts test/host-pick.test.ts test/relay-shutdown.test.ts test/registration-tunnel.test.ts test/tunnel-ws-close.test.ts test/tunnel-reconnect.test.ts test/host-relay.test.ts test/host-list-flow.test.ts test/host-forget.test.ts test/open-workspace.test.ts",
+    "test": "node --test test/host-cli.test.mjs test/relay-package.test.mjs test/relay-login.test.mjs test/workspace-list.test.mjs test/cursor-project-cache.test.mjs && tsx --test --test-concurrency=1 --test-reporter=spec test/live-streams.test.ts test/agent-bin.test.ts test/agent-spawn.test.ts test/lan-ip.test.ts test/project-key.test.ts test/transcript-fold.test.ts test/session-hash.test.ts test/source-ip.test.ts test/request-origin.test.ts test/host-pick.test.ts test/relay-shutdown.test.ts test/registration-tunnel.test.ts test/tunnel-ws-close.test.ts test/tunnel-reconnect.test.ts test/host-relay.test.ts test/host-list-flow.test.ts test/host-forget.test.ts test/open-workspace.test.ts test/workspace-preference.test.ts",
     "prepublishOnly": "npm run build && find .next -name '*.map' -delete"
   },
   "dependencies": {

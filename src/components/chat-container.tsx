@@ -8,6 +8,7 @@ import { useNotification } from "@/hooks/use-notification";
 import { useTerminalList } from "@/hooks/use-terminal-list";
 import { apiFetch } from "@/lib/api-fetch";
 import { vlog } from "@/lib/verbose";
+import { sessionsListSearch, WORKSPACE_STORAGE_KEY } from "@/lib/workspace-preference";
 import type { StoredSession } from "@/lib/types";
 import { MessageList } from "./message-list";
 import { ChatInput } from "./chat-input";
@@ -95,6 +96,14 @@ export function ChatContainer({
       setWorkspace(initialWorkspace);
       return;
     }
+    // Start directory is only the fallback. A stored dropdown Workspace must
+    // not be overwritten by /api/info (Host cwd) after navigating from /hosts.
+    const stored = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+    if (stored === "__all__") return;
+    if (stored) {
+      setWorkspace(stored);
+      return;
+    }
     apiFetch("/api/info")
       .then((r) => r.json())
       .then((data) => setWorkspace(data.workspace || ""))
@@ -103,13 +112,20 @@ export function ChatContainer({
 
   useEffect(() => {
     fetchWorkspace();
-    apiFetch("/api/sessions")
+  }, [fetchWorkspace]);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+    const selected = stored === "__all__" ? "__all__" : workspace;
+    const qs = sessionsListSearch(selected || null);
+    if (qs == null) return;
+    apiFetch("/api/sessions?" + qs)
       .then((r) => r.json())
       .then((data) => {
         if (data.sessions?.length > 0) setRecentSessions(data.sessions.slice(0, 3));
       })
       .catch((err) => console.error("[sessions] Failed to fetch:", err));
-  }, [fetchWorkspace]);
+  }, [workspace]);
 
   useEffect(() => {
     const assistantMsgs = messages.filter((m) => m.role === "assistant").length;
