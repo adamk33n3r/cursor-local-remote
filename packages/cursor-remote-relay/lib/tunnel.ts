@@ -4,10 +4,11 @@ import type { Duplex } from "node:stream";
 import { Buffer } from "node:buffer";
 import { WebSocket, WebSocketServer } from "ws";
 import { isLanSourceIp } from "./source-ip";
-import { getHost, getOnlineHost, listHosts, markHostOffline, onHostsChange, putHost } from "./hosts";
+import { attachLiveClient, getHost, getOnlineHost, markHostOffline, putHost } from "./hosts";
 import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies, pickCookieHeader } from "./login";
-import { isCookieLessHostAsset, resolveHostProxy } from "./host-pick";
+import { isCookieLessHostAsset, isHostListLivePath, resolveHostProxy } from "./host-pick";
 import { urlOnRequestOrigin } from "./request-origin";
+import { RELAY_HOST_ID_HEADER } from "./via-relay";
 
 const TUNNEL_PATH = "/tunnel";
 const HOP_BY_HOP = new Set([
@@ -341,7 +342,7 @@ export async function proxyHostHttp(req: IncomingMessage, res: ServerResponse): 
     id: requestId,
     method: req.method ?? "GET",
     url: target.forwardUrl,
-    headers: filterHeaders(req.headers),
+    headers: { ...filterHeaders(req.headers), [RELAY_HOST_ID_HEADER]: target.hostId },
     body: body.length > 0 ? body.toString("base64") : "",
   });
 
@@ -370,20 +371,15 @@ function handleHostListLive(
   socket: Duplex,
   head: Buffer,
 ): void {
-  void clientIsAuthed(req).then((authed) => {
-    if (!authed) {
-      rejectSocket(socket, 401, "Unauthorized");
-      return;
-    }
-    wss.handleUpgrade(req, socket, head, (clientWs) => {
-      const sendList = (): void => {
-        if (clientWs.readyState === WebSocket.OPEN) {
-          clientWs.send(JSON.stringify({ hosts: listHosts() }));
-        }
-      };
-      const stop = onHostsChange(sendList);
-      clientWs.on("close", stop);
-      sendList();
+  // Finish the 101 immediately. Waiting on Login HMAC first leaves browsers
+  // in CONNECTING with no frames until something else times out.
+  wss.handleUpgrade(req, socket, head, (clientWs) => {
+    void clientIsAuthed(req).then((authed) => {
+      if (!authed) {
+        clientWs.close(1008, "Unauthorized");
+        return;
+      }
+      attachLiveClient(clientWs);
     });
   });
 }
@@ -471,8 +467,12 @@ export function attachTunnel(server: Server, fallbackUpgrade?: UpgradeHandler): 
       handleTunnelUpgrade(wss, req, socket, head);
       return;
     }
-    if (pathname === "/api/hosts/live") {
+    if (isHostListLivePath(pathname)) {
       handleHostListLive(wss, req, socket, head);
+      return;
+    }
+    if (pathname === "/api/hosts" || pathname.startsWith("/api/hosts/")) {
+      rejectSocket(socket, 404, "Not Found");
       return;
     }
     if (targetOf(req)) {

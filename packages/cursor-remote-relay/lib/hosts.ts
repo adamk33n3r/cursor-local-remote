@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { WebSocket } from "ws";
+import { WebSocket } from "ws";
 
 export type HostRecord = {
   id: string;
@@ -20,10 +20,12 @@ export type ForgetResult = "forgotten" | "online" | "missing";
 
 const REGISTRY_KEY = "__cursorRemoteRelayHosts";
 const LISTENERS_KEY = "__cursorRemoteRelayHostListeners";
+const LIVE_KEY = "__cursorRemoteRelayLiveClients";
 
 type RelayGlobals = typeof globalThis & {
   [REGISTRY_KEY]?: Map<string, HostRecord>;
   [LISTENERS_KEY]?: Set<() => void>;
+  [LIVE_KEY]?: Set<WebSocket>;
 };
 
 export function relayStateDir(): string {
@@ -82,8 +84,50 @@ function listeners(): Set<() => void> {
   return created;
 }
 
+function liveClients(): Set<WebSocket> {
+  const g = globalThis as RelayGlobals;
+  const existing = g[LIVE_KEY];
+  if (existing) return existing;
+  const created = new Set<WebSocket>();
+  g[LIVE_KEY] = created;
+  return created;
+}
+
+function sendListSnapshot(ws: WebSocket): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ hosts: listHosts() }));
+}
+
 function emitHostsChange(): void {
-  for (const fn of listeners()) fn();
+  for (const fn of [...listeners()]) {
+    try {
+      fn();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+  const payload = JSON.stringify({ hosts: listHosts() });
+  for (const ws of [...liveClients()]) {
+    if (ws.readyState !== WebSocket.OPEN) {
+      liveClients().delete(ws);
+      continue;
+    }
+    try {
+      ws.send(payload);
+    } catch (err) {
+      console.error(err);
+      liveClients().delete(ws);
+    }
+  }
+}
+
+export function attachLiveClient(ws: WebSocket): void {
+  liveClients().add(ws);
+  const drop = (): void => {
+    liveClients().delete(ws);
+  };
+  ws.once("close", drop);
+  sendListSnapshot(ws);
 }
 
 export function onHostsChange(fn: () => void): () => void {
@@ -108,8 +152,8 @@ export function getHost(id: string): HostRecord | null {
 export function putHost(id: string, name: string, socket: WebSocket): HostRecord {
   const row: HostRecord = { id, name, online: true, socket };
   registry().set(id, row);
-  persistHosts(listHosts());
   emitHostsChange();
+  persistHosts(listHosts());
   return row;
 }
 
@@ -126,8 +170,8 @@ export function forgetHost(id: string): ForgetResult {
   if (!row) return "missing";
   if (row.online) return "online";
   registry().delete(id);
-  persistHosts(listHosts());
   emitHostsChange();
+  persistHosts(listHosts());
   return "forgotten";
 }
 

@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+
+type HostRow = { id: string; online: boolean };
 
 function pickedHostId(): string | null {
   const match = /^\/h\/([^/]+)/.exec(window.location.pathname);
@@ -18,37 +20,101 @@ function liveUrl(): string {
   return `${proto}//${window.location.host}/api/hosts/live`;
 }
 
-export function RelayChrome() {
+function asHostRows(value: unknown): HostRow[] | null {
+  if (!value || typeof value !== "object" || !("hosts" in value)) return null;
+  const hosts = (value as { hosts: unknown }).hosts;
+  if (!Array.isArray(hosts)) return null;
+  return hosts.filter((row): row is HostRow => {
+    if (!row || typeof row !== "object") return false;
+    const rec = row as { id?: unknown; online?: unknown };
+    return typeof rec.id === "string" && typeof rec.online === "boolean";
+  });
+}
+
+export function RelayChrome({ hostId }: { hostId: string | null }) {
+  const [lost, setLost] = useState(false);
+
   useEffect(() => {
-    const hostId = pickedHostId();
-    if (!hostId) return;
-    const ws = new WebSocket(liveUrl());
-    ws.onmessage = (event) => {
+    const id = hostId || pickedHostId();
+    if (!id) return;
+    let cancelled = false;
+    let ws: WebSocket | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function apply(rows: HostRow[]): void {
+      const row = rows.find((h) => h.id === id);
+      if (!row) {
+        window.location.replace("/hosts");
+        return;
+      }
+      setLost(!row.online);
+    }
+
+    async function loadHttp(): Promise<void> {
       try {
-        const body = JSON.parse(String(event.data)) as { hosts?: Array<{ id: string }> };
-        if (!Array.isArray(body.hosts)) return;
-        if (!body.hosts.some((row) => row.id === hostId)) {
-          window.location.replace("/hosts");
-        }
+        const res = await fetch("/api/hosts");
+        if (!res.ok) return;
+        const rows = asHostRows(await res.json());
+        if (!cancelled && rows) apply(rows);
       } catch (err) {
-        console.error("Host list live snapshot was not JSON", err);
+        console.error(err);
+      }
+    }
+
+    function openLive(): void {
+      if (cancelled) return;
+      const socket = new WebSocket(liveUrl());
+      ws = socket;
+      socket.onmessage = (event) => {
+        try {
+          const rows = asHostRows(JSON.parse(String(event.data)));
+          if (rows) apply(rows);
+        } catch (err) {
+          console.error("Host list live snapshot was not JSON", err);
+        }
+      };
+      socket.onclose = () => {
+        if (cancelled || ws !== socket) return;
+        ws = null;
+        setLost(true);
+        retryTimer = setTimeout(openLive, 1_000);
+      };
+    }
+
+    void loadHttp();
+    openLive();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        ws.close();
       }
     };
-    return () => {
-      ws.close();
-    };
-  }, []);
+  }, [hostId]);
 
   return (
-    <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
-      <a href="/hosts" className="rounded px-2 py-1 text-sm text-text-secondary hover:bg-bg-hover">
-        Hosts
-      </a>
-      <form method="post" action="/logout">
-        <button type="submit" className="text-sm text-text-muted hover:text-text">
-          Logout
-        </button>
-      </form>
-    </div>
+    <>
+      <div
+        className="relative z-30 flex shrink-0 items-center justify-between border-b border-border px-3 py-2"
+        data-relay-host-id={hostId ?? ""}
+      >
+        <a href="/hosts" className="rounded px-2 py-1 text-sm text-text-secondary hover:bg-bg-hover">
+          Hosts
+        </a>
+        <form method="post" action="/logout">
+          <button type="submit" className="text-sm text-text-muted hover:text-text">
+            Logout
+          </button>
+        </form>
+      </div>
+      {lost ? (
+        <div
+          className="fixed inset-x-0 bottom-0 top-11 z-20 flex items-center justify-center bg-bg/70 backdrop-blur-[1px]"
+          data-host-lost
+        >
+          <p className="px-6 text-center text-lg text-text">Connection lost to Host, waiting for reconnect</p>
+        </div>
+      ) : null}
+    </>
   );
 }

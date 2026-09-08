@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PICK_COOKIE } from "../packages/cursor-remote-relay/lib/login";
-import { hostPickNextPath, isCookieLessHostAsset, isRelayOwnedPath, isStickyHostPath, resolveHostProxy } from "../packages/cursor-remote-relay/lib/host-pick";
+import { hostPickNextPath, isCookieLessHostAsset, isHostListLivePath, isRelayOwnedPath, isStickyHostPath, resolveHostProxy } from "../packages/cursor-remote-relay/lib/host-pick";
 
 test("Host UI root-absolute assets are sticky; Host list stays on Relay", () => {
   assert.equal(isStickyHostPath("/_next/static/css/app/page.css"), true);
@@ -14,6 +14,9 @@ test("Host UI root-absolute assets are sticky; Host list stays on Relay", () => 
   assert.equal(isRelayOwnedPath("/hosts"), true);
   assert.equal(isRelayOwnedPath("/api/hosts"), true);
   assert.equal(isRelayOwnedPath("/api/hosts/live"), true);
+  assert.equal(isHostListLivePath("/api/hosts/live"), true);
+  assert.equal(isHostListLivePath("/api/hosts/live/"), true);
+  assert.equal(isHostListLivePath("/api/hosts"), false);
   assert.equal(isStickyHostPath("/hosts"), false);
 });
 

@@ -9,32 +9,75 @@ function liveUrl(): string {
   return `${proto}//${window.location.host}/api/hosts/live`;
 }
 
+function asHostRows(value: unknown): HostRow[] | null {
+  if (!value || typeof value !== "object" || !("hosts" in value)) return null;
+  const hosts = (value as { hosts: unknown }).hosts;
+  if (!Array.isArray(hosts)) return null;
+  return hosts.filter((row): row is HostRow => {
+    if (!row || typeof row !== "object") return false;
+    const rec = row as { id?: unknown; name?: unknown; online?: unknown };
+    return typeof rec.id === "string" && typeof rec.name === "string" && typeof rec.online === "boolean";
+  });
+}
+
 export default function HostsPage() {
   const [hosts, setHosts] = useState<HostRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    let ws: WebSocket | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let sawList = false;
-    const ws = new WebSocket(liveUrl());
-    ws.onmessage = (event) => {
+
+    function apply(rows: HostRow[]): void {
+      if (cancelled) return;
+      sawList = true;
+      setError(null);
+      setHosts(rows);
+    }
+
+    async function loadHttp(): Promise<void> {
       try {
-        const body = JSON.parse(String(event.data)) as { hosts: HostRow[] };
-        if (!cancelled && Array.isArray(body.hosts)) {
-          sawList = true;
-          setError(null);
-          setHosts(body.hosts);
-        }
+        const res = await fetch("/api/hosts");
+        if (!res.ok) throw new Error(`Host list HTTP ${res.status}`);
+        const rows = asHostRows(await res.json());
+        if (rows) apply(rows);
       } catch (err: unknown) {
-        if (!cancelled && !sawList) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled && !sawList) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
       }
-    };
-    ws.onerror = () => {
-      if (!cancelled && !sawList) setError("Host list live stream failed");
-    };
+    }
+
+    function openLive(): void {
+      if (cancelled) return;
+      const socket = new WebSocket(liveUrl());
+      ws = socket;
+      socket.onmessage = (event) => {
+        try {
+          const rows = asHostRows(JSON.parse(String(event.data)));
+          if (rows) apply(rows);
+        } catch (err: unknown) {
+          console.error(err);
+          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        }
+      };
+      socket.onclose = () => {
+        if (cancelled || ws !== socket) return;
+        ws = null;
+        retryTimer = setTimeout(openLive, 1_000);
+      };
+    }
+
+    void loadHttp();
+    openLive();
     return () => {
       cancelled = true;
-      ws.close();
+      if (retryTimer) clearTimeout(retryTimer);
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        ws.close();
+      }
     };
   }, []);
 
@@ -59,7 +102,7 @@ export default function HostsPage() {
           </button>
         </form>
       </div>
-      {error ? (
+      {error && hosts === null ? (
         <p className="text-text-muted">{error}</p>
       ) : hosts === null ? (
         <p className="text-text-muted">Loading…</p>
@@ -96,7 +139,7 @@ export default function HostsPage() {
                 </span>
                 <button
                   type="button"
-                  className="text-sm text-text-muted"
+                  className="cursor-pointer text-sm font-medium text-text underline underline-offset-2 hover:text-error"
                   data-forget
                   onClick={() => void forget(host.id)}
                 >

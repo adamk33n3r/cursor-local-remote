@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { PwaInstall } from "@/components/pwa-install";
 import { RelayChrome } from "@/components/relay-chrome";
-import { VIA_RELAY_HEADER, VIA_RELAY_VALUE } from "@/lib/via-relay";
+import { RELAY_HOST_ID_HEADER, VIA_RELAY_HEADER, VIA_RELAY_VALUE } from "@/lib/via-relay";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -36,12 +36,14 @@ if('serviceWorker' in navigator){
 }`;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const viaRelay = (await headers()).get(VIA_RELAY_HEADER) === VIA_RELAY_VALUE;
+  const hdr = await headers();
+  const viaRelay = hdr.get(VIA_RELAY_HEADER) === VIA_RELAY_VALUE;
+  const hostId = hdr.get(RELAY_HOST_ID_HEADER);
   return (
     <html lang="en">
       <body className="overscroll-none flex h-dvh flex-col">
         <script dangerouslySetInnerHTML={{ __html: SW_CLEANUP_SCRIPT }} />
-        {viaRelay ? <RelayChrome /> : null}
+        {viaRelay ? <RelayChrome hostId={hostId} /> : null}
         <div className="min-h-0 flex-1">{children}</div>
         <PwaInstall />
       </body>

@@ -271,6 +271,25 @@ describe("Forget, persist, drop, reconnect", { concurrency: false }, () => {
     assert.equal(forgotten.status, 204);
     assert.deepEqual(await listHosts(relayPort, cookie), []);
 
+    const live = new WebSocket(`ws://127.0.0.1:${relayPort}/api/hosts/live`, {
+      headers: { cookie },
+    });
+    t.after(() => {
+      if (live.readyState === WebSocket.OPEN || live.readyState === WebSocket.CONNECTING) live.terminate();
+    });
+    const snapshot = await new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timed out waiting for live snapshot after Forget")), 2_000);
+      live.once("message", (data) => {
+        clearTimeout(timer);
+        resolve(JSON.parse(String(data)));
+      });
+      live.once("error", (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+    assert.deepEqual(snapshot, { hosts: [] });
+
     await stopProc(first);
     const second = startRelay(["--port", String(relayPort), "--host", "127.0.0.1"], env);
     t.after(() => stopProc(second));

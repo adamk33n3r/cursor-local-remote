@@ -35,6 +35,10 @@ export function isRelayOwnedPath(pathname: string): boolean {
   return pathname === "/api/hosts" || pathname.startsWith("/api/hosts/");
 }
 
+export function isHostListLivePath(pathname: string): boolean {
+  return pathname === "/api/hosts/live" || pathname === "/api/hosts/live/";
+}
+
 /**
  * Root-absolute Host app URLs the browser requests after opening /h/:id/.
  * Next emits /_next and /api at the origin, not under the pick prefix.

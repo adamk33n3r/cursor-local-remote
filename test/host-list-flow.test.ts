@@ -594,6 +594,7 @@ describe("Host list then Host", { concurrency: false }, () => {
     assert.doesNotMatch(relayHtml, /Paste the token/);
     assert.match(relayHtml, /href="\/hosts"/);
     assert.match(relayHtml, /action="\/logout"/);
+    assert.match(relayHtml, new RegExp(`data-relay-host-id="${row.id}"`));
 
     const lan = await fetch(`http://127.0.0.1:${hostPort}/`, {
       headers: { Authorization: "Bearer lan-token" },
