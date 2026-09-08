@@ -549,7 +549,88 @@ export function foldSameRoleText(existing: string, incoming: string): string {
   if (b.startsWith(a)) return incoming;
   if (a.startsWith(b)) return existing;
   if (a === b) return incoming.length >= existing.length ? incoming : existing;
+
+  const la = compactLetters(existing);
+  const lb = compactLetters(incoming);
+  if (sameUtterance(la, lb)) {
+    return preferFormatted(existing, incoming);
+  }
+
+  if (incoming.length < 80 && incoming.length <= existing.length) {
+    if (existing.endsWith(incoming)) return existing;
+    const needSpace = /\S$/.test(existing) && /^\S/.test(incoming);
+    return existing + (needSpace ? " " : "") + incoming;
+  }
+
   return existing + incoming;
+}
+
+function compactLetters(text: string): string {
+  return text.replace(/[\s|*#>`_\-\[\]()]+/g, "").toLowerCase();
+}
+
+function sameUtterance(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b || a.startsWith(b) || b.startsWith(a)) return true;
+  const n = Math.min(a.length, b.length);
+  if (n >= 24 && (a.includes(b) || b.includes(a))) return true;
+  if (n < 24) return false;
+  let i = 0;
+  while (i < n && a[i] === b[i]) i++;
+  return i >= 40 || i >= n * 0.8;
+}
+
+export function mergeMessageLists(fromFile: ChatMessage[], fromLive: ChatMessage[]): ChatMessage[] {
+  const messages = [...fromFile];
+  const seen = new Set(fromFile.map(messageKey));
+
+  for (const message of fromLive) {
+    const key = messageKey(message);
+    if (seen.has(key)) continue;
+    if (messages.some((existing) => existing.role === message.role && sameUtterance(
+      compactLetters(existing.content),
+      compactLetters(message.content),
+    ))) {
+      continue;
+    }
+    const last = messages[messages.length - 1];
+    if (
+      last
+      && last.role === message.role
+      && sameUtterance(compactLetters(last.content), compactLetters(message.content))
+    ) {
+      last.content = foldSameRoleText(last.content, message.content);
+      seen.add(messageKey(last));
+      continue;
+    }
+    seen.add(key);
+    messages.push(message);
+  }
+  return messages;
+}
+
+function messageKey(message: ChatMessage): string {
+  return `${message.role}:${message.content.replace(/\s+/g, " ").trim()}`;
+}
+
+function formattingScore(text: string): number {
+  let score = 0;
+  for (const ch of text) {
+    if (ch === "\n") score += 8;
+    else if (ch === " ") score += 1;
+    else if (ch === "|") score += 4;
+    else if (ch === "*") score += 2;
+  }
+  return score;
+}
+
+function preferFormatted(existing: string, incoming: string): string {
+  const existingScore = formattingScore(existing);
+  const incomingScore = formattingScore(incoming);
+  if (incomingScore !== existingScore) {
+    return incomingScore > existingScore ? incoming : existing;
+  }
+  return incoming.length >= existing.length ? incoming : existing;
 }
 
 function isBufferedAssistantFlush(event: Record<string, unknown>): boolean {
@@ -616,8 +697,8 @@ export function parseLiveEvents(
         } else if (role === "assistant" && openAssistantDelta) {
           prev.content = text;
           openAssistantDelta = false;
-        } else if (role === "assistant" && (text.includes(prev.content) || prev.content.includes(text))) {
-          prev.content = text.length >= prev.content.length ? text : prev.content;
+        } else if (role === "assistant" && sameUtterance(compactLetters(text), compactLetters(prev.content))) {
+          prev.content = foldSameRoleText(prev.content, text);
         } else if (role === "assistant") {
           messages.push({
             id: `${sessionId}-live-${counter.n++}`,

@@ -24,9 +24,9 @@ import {
 } from "@/lib/terminal-registry";
 import {
   getSessionModifiedAt,
-  foldSameRoleText,
   parseLiveEvents,
   overlayToolCallResults,
+  mergeMessageLists,
   readSessionMessages,
   resolveJsonlPath,
 } from "@/lib/transcript-reader";
@@ -103,30 +103,14 @@ function sendEvent(ws: WebSocket, event: string, data: unknown): void {
   ws.send(JSON.stringify({ event, data }));
 }
 
-function messageKey(message: ChatMessage): string {
-  return `${message.role}:${message.content.replace(/\s+/g, " ").trim()}`;
-}
-
 function mergeTranscript(
   fromFile: { messages: ChatMessage[]; toolCalls: ToolCallInfo[] },
   fromLive: { messages: ChatMessage[]; toolCalls: ToolCallInfo[] },
 ): { messages: ChatMessage[]; toolCalls: ToolCallInfo[] } {
-  const seen = new Set(fromFile.messages.map(messageKey));
-  const messages = [...fromFile.messages];
-  for (const message of fromLive.messages) {
-    const key = messageKey(message);
-    if (seen.has(key)) continue;
-    const last = messages[messages.length - 1];
-    if (last && last.role === message.role) {
-      last.content = foldSameRoleText(last.content, message.content);
-      seen.add(messageKey(last));
-      continue;
-    }
-    seen.add(key);
-    messages.push(message);
-  }
-  const toolCalls = overlayToolCallResults(fromFile.toolCalls, fromLive.toolCalls);
-  return { messages, toolCalls };
+  return {
+    messages: mergeMessageLists(fromFile.messages, fromLive.messages),
+    toolCalls: overlayToolCallResults(fromFile.toolCalls, fromLive.toolCalls),
+  };
 }
 
 export function handleLiveHttpRequest(req: IncomingMessage, res: ServerResponse): boolean {

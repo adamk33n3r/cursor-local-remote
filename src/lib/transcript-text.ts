@@ -2,6 +2,8 @@
 
 export function displayTranscriptText(text: string): string {
   return text
+    .replace(/<manually_attached_skills>[\s\S]*?<\/manually_attached_skills>\s*/gi, "")
+    .replace(/<image_files>[\s\S]*?<\/image_files>\s*/gi, "")
     .replace(/<timestamp>[\s\S]*?<\/timestamp>\s*/gi, "")
     .replace(/<user_query>\n?/gi, "")
     .replace(/<\/user_query>\n?/gi, "")

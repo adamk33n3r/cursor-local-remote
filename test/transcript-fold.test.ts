@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { foldSameRoleText, overlayToolCallResults, parseLiveEvents } from "../src/lib/transcript-reader";
+import { foldSameRoleText, mergeMessageLists, overlayToolCallResults, parseLiveEvents } from "../src/lib/transcript-reader";
 import { displayTranscriptText, normalizeUserPrompt } from "../src/lib/transcript-text";
 
 test("foldSameRoleText keeps a growing snapshot instead of concatenating", () => {
@@ -36,6 +36,52 @@ test("displayTranscriptText drops Cursor wrappers and [REDACTED]", () => {
   );
   assert.equal(displayTranscriptText("see `[REDACTED]` here"), "see  here");
   assert.equal(normalizeUserPrompt(raw), "that was great");
+});
+
+test("displayTranscriptText keeps the user prompt and drops inlined skill bodies", () => {
+  const raw = `<manually_attached_skills>
+The user has manually attached the following skills to their message.
+Skill Name: setup-matt-pocock-skills
+SKILL.md content:
+# Setup Matt Pocock's Skills
+Only read the files if needed, the full skill content is inlined here.
+</manually_attached_skills>
+<timestamp>Monday, Sep 7, 2026, 7:00 PM (UTC-4)</timestamp>
+<user_query>
+ok run /setup-matt-pocock-skills
+</user_query>`;
+  assert.equal(displayTranscriptText(raw), "ok run /setup-matt-pocock-skills");
+  assert.equal(normalizeUserPrompt(raw), "ok run /setup-matt-pocock-skills");
+});
+
+test("foldSameRoleText prefers the spaced snapshot over a compacted jumble", () => {
+  const jumble = "Exploringtherepotoseewhat'salreadyconfigured.Exploring the repo to see what's already configured.**Exploration findings**|Item|Status|";
+  const clean = "Exploring the repo to see what's already configured.\n\n**Exploration findings**\n\n| Item | Status |\n| --- | --- |";
+  assert.equal(foldSameRoleText(jumble, clean), clean);
+  assert.equal(foldSameRoleText("Exploring", "the"), "Exploring the");
+});
+
+test("mergeMessageLists does not glue a prior assistant turn onto the next one", () => {
+  const findings = "## Exploration findings\n\n| Item | Status |\n|------|--------|\n| Git repo | **No** |";
+  const complete = "Setup is complete. Here's what was created:\n\n| File | Purpose |\n|------|---------|\n| `AGENTS.md` | Agent skills index |";
+  const merged = mergeMessageLists(
+    [
+      { id: "u1", role: "user", content: "/setup-matt-pocock-skills", timestamp: 1 },
+      { id: "a1", role: "assistant", content: findings, timestamp: 2 },
+      { id: "u2", role: "user", content: "use github. the rest of the defaults are good, create an AGENTS.md file", timestamp: 3 },
+      { id: "a2", role: "assistant", content: complete, timestamp: 4 },
+    ],
+    [
+      { id: "lu1", role: "user", content: "/setup-matt-pocock-skills", timestamp: 1 },
+      { id: "la1", role: "assistant", content: `${findings}\n\n**Local markdown?**`, timestamp: 2 },
+      { id: "lu2", role: "user", content: "use github. the rest of the defaults are good, create an AGENTS.md file", timestamp: 3 },
+      { id: "la2", role: "assistant", content: complete, timestamp: 4 },
+    ],
+  );
+  assert.equal(merged.length, 4);
+  assert.equal(merged[1]?.content.includes("Exploration findings"), true);
+  assert.equal(merged[3]?.content.startsWith("Setup is complete."), true);
+  assert.equal(merged[3]?.content.includes("Exploration findings"), false);
 });
 
 test("parseLiveEvents does not double a repeated assistant snapshot", () => {
