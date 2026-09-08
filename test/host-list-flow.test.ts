@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
-import { createServer as createNetServer } from "node:net";
+import { connect as connectTcp, createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
@@ -132,6 +132,57 @@ async function loginCookie(relayPort: number): Promise<string> {
   return cookie.split(";")[0];
 }
 
+function websocketUpgradeRequest(pathname: string, cookie?: string): string {
+  const lines = [
+    `GET ${pathname} HTTP/1.1`,
+    "Host: 127.0.0.1",
+    "Upgrade: websocket",
+    "Connection: Upgrade",
+    "Sec-WebSocket-Version: 13",
+    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+  ];
+  if (cookie) lines.push(`Cookie: ${cookie}`);
+  lines.push("", "");
+  return lines.join("\r\n");
+}
+
+function rawUpgradeStatus(
+  port: number,
+  pathname: string,
+  cookie: string | undefined,
+  timeoutMs: number,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = connectTcp({ port, host: "127.0.0.1" });
+    let buf = "";
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error(`timed out waiting for upgrade response to ${pathname}; got ${JSON.stringify(buf)}`));
+    }, timeoutMs);
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      buf += chunk;
+      const end = buf.indexOf("\r\n");
+      if (end === -1) return;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(buf.slice(0, end));
+    });
+    socket.on("close", () => {
+      clearTimeout(timer);
+      if (buf.includes("\r\n")) return;
+      resolve("connection-closed");
+    });
+    socket.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    socket.on("connect", () => {
+      socket.write(websocketUpgradeRequest(pathname, cookie));
+    });
+  });
+}
+
 async function waitForHostRow(
   relayPort: number,
   cookie: string,
@@ -236,6 +287,26 @@ describe("Host list then Host", { concurrency: false }, () => {
     assert.deepEqual(await listed.json(), {
       hosts: [{ id: hostId, name: "Desk PC", online: false }],
     });
+  });
+
+  test("live WebSocket 101 is not blocked by a hanging Next HMR upgrade", async (t) => {
+    const relayPort = await freePort();
+    const proc = startRelay(
+      ["--port", String(relayPort), "--host", "127.0.0.1"],
+      relayEnv({ LOGIN_USERNAME: "relay-user", LOGIN_PASSWORD: "correct-horse" }),
+    );
+    t.after(() => stopRelay(proc));
+    await waitForStdout(proc, /Press Ctrl\+C to stop/, 60_000);
+
+    const cookie = await loginCookie(relayPort);
+    const hmr = await rawUpgradeStatus(relayPort, "/_next/webpack-hmr", undefined, 1_500);
+    assert.ok(
+      hmr === "connection-closed" || hmr.startsWith("HTTP/1.1 "),
+      `HMR upgrade stayed pending: ${hmr}`,
+    );
+
+    const live = await rawUpgradeStatus(relayPort, "/api/hosts/live", cookie, 1_500);
+    assert.equal(live, "HTTP/1.1 101 Switching Protocols");
   });
 
   test("Host list live stream pushes new rows and online/offline without a new HTTP GET", async (t) => {

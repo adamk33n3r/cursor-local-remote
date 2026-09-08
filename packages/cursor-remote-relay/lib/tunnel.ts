@@ -475,14 +475,18 @@ export function attachTunnel(server: Server, fallbackUpgrade?: UpgradeHandler): 
       rejectSocket(socket, 404, "Not Found");
       return;
     }
-    if (targetOf(req)) {
+    const target = targetOf(req);
+    if (target) {
       handleClientWsUpgrade(wss, req, socket, head);
       return;
     }
-    if (fallbackUpgrade) {
+    // Next's upgradeHandler only completes webpack HMR. Other paths (e.g.
+    // /api/terminal/list with no Host pick) never write a 101, and Chrome
+    // queues /api/hosts/live and webpack-hmr behind that Pending handshake.
+    if (pathname.startsWith("/_next/") && fallbackUpgrade) {
       fallbackUpgrade(req, socket, head);
       return;
     }
-    socket.destroy();
+    rejectSocket(socket, 404, "Not Found");
   });
 }
