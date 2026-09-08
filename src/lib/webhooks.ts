@@ -2,6 +2,7 @@ import { getConfig, getSessionTitle } from "@/lib/session-store";
 import { readSessionMessages } from "@/lib/transcript-reader";
 import { getNetworkInfo } from "@/lib/network";
 import { DEFAULT_PORT } from "@/lib/constants";
+import { buildSessionHash } from "@/lib/session-hash";
 import type { TodoItem } from "@/lib/types";
 
 export async function getWebhookUrl(): Promise<string> {
@@ -87,10 +88,7 @@ async function buildSessionUrl(sessionId: string, workspace?: string): Promise<s
     const info = await getNetworkInfo(port);
     const token = process.env.AUTH_TOKEN;
     const base = token ? `${info.url}?token=${token}` : info.url;
-    const hash = workspace
-      ? `#session=${sessionId}&workspace=${encodeURIComponent(workspace)}`
-      : `#session=${sessionId}`;
-    return `${base}${hash}`;
+    return `${base}${buildSessionHash({ sessionId, workspace })}`;
   } catch {
     return undefined;
   }

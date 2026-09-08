@@ -12,6 +12,7 @@ import { SettingsPanel } from "./settings-panel";
 import { QrModal } from "./qr-modal";
 import { ErrorBoundary } from "./error-boundary";
 import { uuid } from "@/lib/uuid";
+import { parseSessionHash, replaceSessionHash } from "@/lib/session-hash";
 
 interface ChatInstance {
   id: string;
@@ -35,13 +36,7 @@ function makeInstance(initialSessionId?: string, initialWorkspace?: string): Cha
 
 function getHashParams(): { sessionId: string | null; workspace: string | null } {
   if (typeof window === "undefined") return { sessionId: null, workspace: null };
-  const hash = window.location.hash;
-  const sessionMatch = hash.match(/session=([a-f0-9-]+)/i);
-  const workspaceMatch = hash.match(/workspace=([^&]+)/);
-  return {
-    sessionId: sessionMatch?.[1] ?? null,
-    workspace: workspaceMatch ? decodeURIComponent(workspaceMatch[1]) : null,
-  };
+  return parseSessionHash(window.location.hash);
 }
 
 export function ChatWorkspace({ sidebarOpenInitially = false }: { sidebarOpenInitially?: boolean }) {
@@ -57,12 +52,6 @@ export function ChatWorkspace({ sidebarOpenInitially = false }: { sidebarOpenIni
   const haptics = useHaptics();
   const restoredRef = useRef(false);
   const settingsLoadedRef = useRef(false);
-
-  useEffect(() => {
-    if (window.location.hash.includes("session=")) {
-      history.replaceState(null, "", window.location.pathname + window.location.search);
-    }
-  }, []);
 
   useEffect(() => {
     if (settingsLoadedRef.current) return;
@@ -94,7 +83,13 @@ export function ChatWorkspace({ sidebarOpenInitially = false }: { sidebarOpenIni
 
           const inst = makeInstance(sessionId);
 
-          if (i === 0 && newInstances.length === 1 && !newInstances[0].sessionId && !newInstances[0].isStreaming) {
+          if (
+            i === 0
+            && newInstances.length === 1
+            && !newInstances[0].sessionId
+            && !newInstances[0].initialSessionId
+            && !newInstances[0].isStreaming
+          ) {
             newInstances[0] = inst;
             focusId = inst.id;
           } else {
@@ -188,15 +183,21 @@ export function ChatWorkspace({ sidebarOpenInitially = false }: { sidebarOpenIni
     });
   }, []);
 
-  const handleWorkspaceChange = useCallback((workspace: string | null) => {
+  const handleWorkspaceChange = useCallback((instanceId: string, workspace: string | null) => {
     const ws = workspace ?? undefined;
     setInstances((prev) => {
-      const current = prev.find((i) => i.id === activeId);
-      if (!current || current.sessionId || current.isStreaming) return prev;
+      const current = prev.find((i) => i.id === instanceId);
+      if (!current) return prev;
       if (current.initialWorkspace === ws) return prev;
-      return prev.map((i) => (i.id === activeId ? { ...i, initialWorkspace: ws } : i));
+      if (!current.sessionId && !current.isStreaming) {
+        return prev.map((i) => (i.id === instanceId ? { ...i, initialWorkspace: ws } : i));
+      }
+      if (!current.initialWorkspace && ws) {
+        return prev.map((i) => (i.id === instanceId ? { ...i, initialWorkspace: ws } : i));
+      }
+      return prev;
     });
-  }, [activeId]);
+  }, []);
 
   const terminals = useTerminalList();
   const workspaceTerminals = useMemo(() => {
@@ -208,6 +209,13 @@ export function ChatWorkspace({ sidebarOpenInitially = false }: { sidebarOpenIni
   }, [terminals]);
 
   const currentSessionId = instances.find((i) => i.id === activeId)?.sessionId ?? null;
+  const activeInstance = instances.find((i) => i.id === activeId);
+
+  useEffect(() => {
+    const sessionId = activeInstance?.sessionId ?? activeInstance?.initialSessionId ?? null;
+    const workspace = activeInstance?.initialWorkspace ?? parseSessionHash(window.location.hash).workspace;
+    replaceSessionHash({ sessionId, workspace });
+  }, [activeInstance?.sessionId, activeInstance?.initialSessionId, activeInstance?.initialWorkspace]);
 
   return (
     <div className="h-full">
@@ -221,6 +229,7 @@ export function ChatWorkspace({ sidebarOpenInitially = false }: { sidebarOpenIni
               onLabelChange={(label) => updateLabel(inst.id, label)}
               onStreamingChange={(s) => updateStreaming(inst.id, s)}
               onSessionIdChange={(sid) => updateSessionId(inst.id, sid)}
+              onWorkspaceChange={(ws) => handleWorkspaceChange(inst.id, ws)}
               onSelectSession={handleSelectSession}
               onOpenSidebar={() => setSidebarOpen(true)}
               onOpenSettings={() => setSettingsOpen(true)}
@@ -234,9 +243,10 @@ export function ChatWorkspace({ sidebarOpenInitially = false }: { sidebarOpenIni
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         currentSessionId={currentSessionId}
+        currentWorkspace={activeInstance?.initialWorkspace ?? null}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
-        onWorkspaceChange={handleWorkspaceChange}
+        onWorkspaceChange={(ws) => handleWorkspaceChange(activeId, ws)}
         activeStatuses={activeStatuses}
         workspaceTerminals={workspaceTerminals}
       />

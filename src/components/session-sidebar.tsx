@@ -16,6 +16,7 @@ interface SessionSidebarProps {
   onSelectSession: (id: string, workspace?: string) => void;
   onNewSession: (workspace?: string) => void;
   onWorkspaceChange?: (workspace: string | null) => void;
+  currentWorkspace?: string | null;
   activeStatuses?: Record<string, "streaming" | "idle">;
   workspaceTerminals?: Record<string, number>;
 }
@@ -153,6 +154,7 @@ export function SessionSidebar({
   onSelectSession,
   onNewSession,
   onWorkspaceChange,
+  currentWorkspace = null,
   activeStatuses = {},
   workspaceTerminals = {},
 }: SessionSidebarProps) {
@@ -210,23 +212,49 @@ export function SessionSidebar({
     apiFetch("/api/projects")
       .then((r) => r.json())
       .then((data) => {
-        const list: WorkspaceInfo[] = data.workspaces || data.projects || [];
+        const list: WorkspaceInfo[] = [...(data.workspaces || data.projects || [])];
         const insensitive = Boolean(data.pathInsensitive);
+        if (
+          currentWorkspace
+          && !list.some((w) => sameWorkspacePath(w.path, currentWorkspace, insensitive))
+        ) {
+          const name = currentWorkspace.split(/[/\\]/).filter(Boolean).pop() || currentWorkspace;
+          list.push({ name, path: currentWorkspace, key: name });
+        }
         setWorkspaces(list);
         setPathInsensitive(insensitive);
-        if (selectedProject && selectedProject !== "__all__") {
-          const match = list.find((w) => sameWorkspacePath(w.path, selectedProject, insensitive));
-          if (match && match.path !== selectedProject) {
+        // selectedProject starts null (localStorage is read in an effect to avoid SSR
+        // mismatch). This fetch often returns first with that null closure, so treat
+        // storage as the preference — otherwise Start directory overwrites cooking-game.
+        const stored = localStorage.getItem(PROJECT_STORAGE_KEY);
+        const preference = selectedProject ?? stored;
+        if (preference && preference !== "__all__") {
+          const match = list.find((w) => sameWorkspacePath(w.path, preference, insensitive));
+          if (match && match.path !== preference) {
             setSelectedProject(match.path);
             localStorage.setItem(PROJECT_STORAGE_KEY, match.path);
+          } else if (!selectedProject) {
+            setSelectedProject(preference);
           }
-        } else if (!selectedProject && data.currentWorkspace) {
+        } else if (preference === "__all__" && !selectedProject) {
+          setSelectedProject("__all__");
+        } else if (!preference && !currentWorkspace && data.currentWorkspace) {
           setSelectedProject(data.currentWorkspace);
           localStorage.setItem(PROJECT_STORAGE_KEY, data.currentWorkspace);
         }
       })
       .catch(() => {});
-  }, [selectedProject]);
+  }, [selectedProject, currentWorkspace]);
+
+  useEffect(() => {
+    if (!currentWorkspace) return;
+    setSelectedProject((prev) => {
+      if (prev === "__all__") return prev;
+      if (prev && sameWorkspacePath(prev, currentWorkspace, pathInsensitive)) return prev;
+      localStorage.setItem(PROJECT_STORAGE_KEY, currentWorkspace);
+      return currentWorkspace;
+    });
+  }, [currentWorkspace, pathInsensitive]);
 
   const fetchSessions = useCallback(() => {
     setFetchError(null);

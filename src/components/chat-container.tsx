@@ -23,6 +23,7 @@ interface ChatContainerProps {
   onLabelChange?: (label: string) => void;
   onStreamingChange?: (streaming: boolean) => void;
   onSessionIdChange?: (sessionId: string | null) => void;
+  onWorkspaceChange?: (workspace: string | null) => void;
   onSelectSession?: (id: string, workspace?: string) => void;
   onOpenSidebar?: () => void;
   onOpenSettings?: () => void;
@@ -36,6 +37,7 @@ export function ChatContainer({
   onLabelChange,
   onStreamingChange,
   onSessionIdChange,
+  onWorkspaceChange,
   onSelectSession,
   onOpenSidebar,
   onOpenSettings,
@@ -155,6 +157,11 @@ export function ChatContainer({
     onSessionIdChange?.(sessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  useEffect(() => {
+    if (workspace) onWorkspaceChange?.(workspace);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace]);
 
   useEffect(() => {
     const firstUser = messages.find((m) => m.role === "user");
