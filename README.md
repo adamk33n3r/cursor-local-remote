@@ -186,7 +186,7 @@ All endpoints require a valid token (cookie or `Bearer` header).
 
 ## Requirements
 
-- [Node.js](https://nodejs.org/) 20+
+- [Node.js](https://nodejs.org/) 22+
 - [Cursor](https://cursor.com) with the CLI installed (`agent --version` should work)
 - A Cursor subscription (Pro, Team, etc.)
 
