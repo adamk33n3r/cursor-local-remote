@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { startReconnectingWebSocket } from "../../../lib/reconnect-live-ws";
 
 type HostRow = { id: string; name: string; online: boolean };
 
@@ -26,8 +27,6 @@ export default function HostsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    let ws: WebSocket | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let sawList = false;
 
     function apply(rows: HostRow[]): void {
@@ -50,34 +49,23 @@ export default function HostsPage() {
       }
     }
 
-    function openLive(): void {
-      if (cancelled) return;
-      const socket = new WebSocket(liveUrl());
-      ws = socket;
-      socket.onmessage = (event) => {
+    const live = startReconnectingWebSocket({
+      url: liveUrl,
+      onMessage(data) {
         try {
-          const rows = asHostRows(JSON.parse(String(event.data)));
+          const rows = asHostRows(JSON.parse(data));
           if (rows) apply(rows);
         } catch (err: unknown) {
           console.error(err);
           if (!cancelled) setError(err instanceof Error ? err.message : String(err));
         }
-      };
-      socket.onclose = () => {
-        if (cancelled || ws !== socket) return;
-        ws = null;
-        retryTimer = setTimeout(openLive, 1_000);
-      };
-    }
+      },
+    });
 
     void loadHttp();
-    openLive();
     return () => {
       cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-        ws.close();
-      }
+      live.stop();
     };
   }, []);
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { startReconnectingWebSocket } from "@/lib/reconnect-live-ws";
 
 type HostRow = { id: string; online: boolean };
 
@@ -38,8 +39,6 @@ export function RelayChrome({ hostId }: { hostId: string | null }) {
     const id = hostId || pickedHostId();
     if (!id) return;
     let cancelled = false;
-    let ws: WebSocket | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     function apply(rows: HostRow[]): void {
       const row = rows.find((h) => h.id === id);
@@ -61,34 +60,25 @@ export function RelayChrome({ hostId }: { hostId: string | null }) {
       }
     }
 
-    function openLive(): void {
-      if (cancelled) return;
-      const socket = new WebSocket(liveUrl());
-      ws = socket;
-      socket.onmessage = (event) => {
+    const live = startReconnectingWebSocket({
+      url: liveUrl,
+      onDisconnected() {
+        if (!cancelled) setLost(true);
+      },
+      onMessage(data) {
         try {
-          const rows = asHostRows(JSON.parse(String(event.data)));
+          const rows = asHostRows(JSON.parse(data));
           if (rows) apply(rows);
         } catch (err) {
           console.error("Host list live snapshot was not JSON", err);
         }
-      };
-      socket.onclose = () => {
-        if (cancelled || ws !== socket) return;
-        ws = null;
-        setLost(true);
-        retryTimer = setTimeout(openLive, 1_000);
-      };
-    }
+      },
+    });
 
     void loadHttp();
-    openLive();
     return () => {
       cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-        ws.close();
-      }
+      live.stop();
     };
   }, [hostId]);
 
