@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noEmit": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "src/lib",
+    "outDir": "dist",
+    "declaration": false,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": [
+    "src/lib/lan-ip.ts",
+    "src/lib/host-identity.ts",
+    "src/lib/host-lock.ts",
+    "src/lib/tunnel-client.ts",
+    "src/lib/via-relay.ts"
+  ]
+}

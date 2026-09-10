@@ -3,12 +3,12 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { Buffer } from "node:buffer";
 import { WebSocket, WebSocketServer } from "ws";
-import { isLanSourceIp } from "./source-ip";
-import { attachLiveClient, getHost, getOnlineHost, markHostOffline, putHost } from "./hosts";
-import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies, pickCookieHeader } from "./login";
-import { isCookieLessHostAsset, isHostListLivePath, resolveHostProxy } from "./host-pick";
-import { urlOnRequestOrigin } from "./request-origin";
-import { RELAY_HOST_ID_HEADER } from "./via-relay";
+import { isLanSourceIp } from "./source-ip.js";
+import { attachLiveClient, getHost, getOnlineHost, markHostOffline, putHost } from "./hosts.js";
+import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies, pickCookieHeader } from "./login.js";
+import { isCookieLessHostAsset, isHostListLivePath, resolveHostProxy } from "./host-pick.js";
+import { urlOnRequestOrigin } from "./request-origin.js";
+import { RELAY_HOST_ID_HEADER } from "./via-relay.js";
 
 const TUNNEL_PATH = "/tunnel";
 const HOP_BY_HOP = new Set([

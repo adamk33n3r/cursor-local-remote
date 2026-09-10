@@ -9,21 +9,17 @@ import { randomInt } from "crypto";
 import { createServer } from "net";
 import http from "http";
 import qrcode from "qrcode-terminal";
-import { mergeKnownWorkspaces } from "../src/lib/merge-known-workspaces.mjs";
-import { listSessionStoreWorkspaces } from "../src/lib/list-session-workspaces.mjs";
-import { listCursorCacheWorkspaces } from "../src/lib/cursor-project-cache.mjs";
-import { register } from "tsx/esm/api";
-
-// Node cannot load TypeScript until tsx is registered. ESM static imports are
-// hoisted, so Host identity/lock/tunnel stay as top-level dynamic imports.
-register();
-const { getLanIp } = await import("../src/lib/lan-ip.ts");
-const { hostStateDir, loadOrCreateHostId } = await import("../src/lib/host-identity.ts");
-const { clearHostLock, findExistingHost, writeHostLock } = await import("../src/lib/host-lock.ts");
-const { connectHostTunnel } = await import("../src/lib/tunnel-client.ts");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
+const distLanIp = resolve(projectRoot, "dist/lan-ip.js");
+const srcLanIp = resolve(projectRoot, "src/lib/lan-ip.ts");
+const buildIdPath = resolve(projectRoot, ".next", "BUILD_ID");
+
+function fail(message) {
+  console.error(`  Error: ${message}`);
+  process.exit(1);
+}
 
 const WORDS = [
   "alpha","amber","anvil","apple","arrow","atlas","azure","badge","baker","beach",
@@ -110,6 +106,9 @@ if (args.includes("--status")) {
 }
 
 if (args.includes("--list") || args.includes("-l")) {
+  const { mergeKnownWorkspaces } = await import("../src/lib/merge-known-workspaces.mjs");
+  const { listSessionStoreWorkspaces } = await import("../src/lib/list-session-workspaces.mjs");
+  const { listCursorCacheWorkspaces } = await import("../src/lib/cursor-project-cache.mjs");
   const fromCursorCache = listCursorCacheWorkspaces();
   const fromSessionStore = await listSessionStoreWorkspaces();
   const { workspaces } = mergeKnownWorkspaces({
@@ -163,6 +162,8 @@ if (args.includes("--help") || args.includes("-h")) {
     --force        Pass --force to Agent (Run Everything; deny still applies)
     --no-force     Do not pass --force (Host settings toggle still applies)
     --no-trust     Alias for --no-force
+    --dev          Force Next development (HMR), even if a build exists
+    --start        Require a production build (dist/ + .next)
     -v, --verbose  Show all Host and Agent output
 
   Commands:
@@ -193,6 +194,8 @@ let noOpen = false;
 let noQr = false;
 let verbose = false;
 let forceOverride = null;
+let forceDev = false;
+let forceStart = false;
 let customToken = null;
 let hostname = "0.0.0.0";
 let relayUrl = process.env.RELAY_URL || "";
@@ -223,6 +226,10 @@ for (let i = 0; i < args.length; i++) {
     forceOverride = true;
   } else if (a === "--no-force" || a === "--no-trust") {
     forceOverride = false;
+  } else if (a === "--dev") {
+    forceDev = true;
+  } else if (a === "--start") {
+    forceStart = true;
   } else if (a === "--trust") {
     // Agent --trust is always passed; keep the flag so old invocations still parse.
   } else if (!a.startsWith("-")) {
@@ -256,6 +263,58 @@ if (!existsSync(workspace)) {
   console.error(`  Error: workspace path does not exist: ${workspace}`);
   process.exit(1);
 }
+
+if (forceDev && forceStart) {
+  fail("--dev and --start cannot be used together");
+}
+
+const isBuilt = existsSync(buildIdPath);
+let useTs = false;
+if (forceDev) {
+  if (!existsSync(srcLanIp)) fail("--dev requires a source checkout");
+  useTs = true;
+} else if (forceStart) {
+  if (!existsSync(distLanIp)) fail("compiled CLI missing (dist/). Run npm run build.");
+  if (!isBuilt) fail("Next build missing (.next/BUILD_ID). Run npm run build.");
+  useTs = false;
+} else if (existsSync(distLanIp)) {
+  useTs = false;
+} else if (existsSync(srcLanIp)) {
+  useTs = true;
+} else {
+  fail("compiled CLI missing (dist/). Run npm run build.");
+}
+
+const nextStart = forceDev ? false : forceStart || isBuilt;
+if (nextStart && !isBuilt) {
+  fail("Next build missing (.next/BUILD_ID). Run npm run build.");
+}
+
+/** @type {typeof import("../src/lib/lan-ip.ts")} */
+let lanIpMod;
+/** @type {typeof import("../src/lib/host-identity.ts")} */
+let hostIdentityMod;
+/** @type {typeof import("../src/lib/host-lock.ts")} */
+let hostLockMod;
+/** @type {typeof import("../src/lib/tunnel-client.ts")} */
+let tunnelClientMod;
+if (useTs) {
+  const { register } = await import("tsx/esm/api");
+  register();
+  lanIpMod = await import("../src/lib/lan-ip.ts");
+  hostIdentityMod = await import("../src/lib/host-identity.ts");
+  hostLockMod = await import("../src/lib/host-lock.ts");
+  tunnelClientMod = await import("../src/lib/tunnel-client.ts");
+} else {
+  lanIpMod = await import("../dist/lan-ip.js");
+  hostIdentityMod = await import("../dist/host-identity.js");
+  hostLockMod = await import("../dist/host-lock.js");
+  tunnelClientMod = await import("../dist/tunnel-client.js");
+}
+const { getLanIp } = lanIpMod;
+const { hostStateDir, loadOrCreateHostId } = hostIdentityMod;
+const { clearHostLock, findExistingHost, writeHostLock } = hostLockMod;
+const { connectHostTunnel } = tunnelClientMod;
 
 const stateDir = hostStateDir();
 const existingHost = await findExistingHost(stateDir);
@@ -360,8 +419,7 @@ function openBrowser() {
   }
 }
 
-const isBuilt = existsSync(resolve(projectRoot, ".next", "BUILD_ID"));
-const hostHttpArgs = isBuilt ? ["--start"] : [];
+const hostHttpArgs = nextStart ? ["--start"] : [];
 
 const childEnv = {
   ...process.env,
@@ -370,7 +428,7 @@ const childEnv = {
   HOST: hostname,
   AUTH_TOKEN: authToken,
   CLR_VERBOSE: verbose ? "1" : "",
-  NODE_ENV: isBuilt ? "production" : process.env.NODE_ENV || "development",
+  NODE_ENV: nextStart ? "production" : process.env.NODE_ENV || "development",
 };
 delete childEnv.CURSOR_FORCE;
 if (forceOverride !== null) childEnv.CURSOR_FORCE = forceOverride ? "1" : "0";

@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.worktrees
+dist
+test
+*.md
+.env
+.env.local
+.DS_Store
+packages
+.cursor

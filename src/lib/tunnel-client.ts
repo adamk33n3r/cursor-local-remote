@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import http from "node:http";
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
 import { WebSocket } from "ws";
-import { VIA_RELAY_HEADER, VIA_RELAY_VALUE } from "./via-relay";
+import { VIA_RELAY_HEADER, VIA_RELAY_VALUE } from "./via-relay.js";
 
 export type HostTunnel = {
   close: () => Promise<void>;

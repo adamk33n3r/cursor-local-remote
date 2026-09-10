@@ -1,20 +1,22 @@
 #!/usr/bin/env node
 
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { register } from "tsx/esm/api";
 
-// Node cannot load TypeScript until tsx is registered. ESM static imports are
-// hoisted, so listenWithNext stays as a top-level dynamic import.
-register();
-const { listenWithNext } = await import("../lib/listen-with-next.ts");
-const { getLanIp } = await import("../lib/lan-ip.ts");
-const { closeHttpServer } = await import("../lib/stop-http.ts");
+const relayRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const distLanIp = join(relayRoot, "dist/lan-ip.js");
+const srcLanIp = join(relayRoot, "lib/lan-ip.ts");
+const buildIdPath = join(relayRoot, ".next", "BUILD_ID");
 
 const DEFAULT_PORT = 3200;
 const DEFAULT_BIND = "0.0.0.0";
+
+function fail(message) {
+  console.error(`  Error: ${message}`);
+  process.exit(1);
+}
 
 function parseArgs(argv) {
   let rawPort = process.env.PORT || String(DEFAULT_PORT);
@@ -22,6 +24,8 @@ function parseArgs(argv) {
   // var is the Host's Next listen address and would silently loopback the Relay.
   let bind = DEFAULT_BIND;
   let configPath = null;
+  let forceDev = false;
+  let forceStart = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--port" || a === "-p") {
@@ -30,13 +34,15 @@ function parseArgs(argv) {
       bind = argv[++i] || bind;
     } else if (a === "--config") {
       configPath = argv[++i] || configPath;
+    } else if (a === "--dev") {
+      forceDev = true;
+    } else if (a === "--start") {
+      forceStart = true;
     } else if (a === "--help" || a === "-h") {
       printHelp();
       process.exit(0);
     } else if (a === "--version" || a === "-V") {
-      const pkg = JSON.parse(
-        readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8"),
-      );
+      const pkg = JSON.parse(readFileSync(join(relayRoot, "package.json"), "utf8"));
       console.log(pkg.version);
       process.exit(0);
     }
@@ -46,7 +52,8 @@ function parseArgs(argv) {
     console.error(`  Error: invalid port: ${rawPort}`);
     process.exit(1);
   }
-  return { port, bind, configPath };
+  if (forceDev && forceStart) fail("--dev and --start cannot be used together");
+  return { port, bind, configPath, forceDev, forceStart };
 }
 
 function printHelp() {
@@ -60,6 +67,8 @@ function printHelp() {
     -p, --port     Port to listen on (default: 3200)
     --host         Bind address (default: 0.0.0.0)
     --config       JSON file with Login username and password
+    --dev          Force Next development (HMR), even if a build exists
+    --start        Require a production build (dist/ + .next)
     -V, --version  Show version number
     -h, --help     Show this help
 
@@ -106,7 +115,39 @@ function listenPlain(port, bind, handler) {
   });
 }
 
-const { port, bind, configPath } = parseArgs(process.argv.slice(2));
+const { port, bind, configPath, forceDev, forceStart } = parseArgs(process.argv.slice(2));
+const isBuilt = existsSync(buildIdPath);
+let useTs = false;
+if (forceDev) {
+  if (!existsSync(srcLanIp)) fail("--dev requires a source checkout");
+  useTs = true;
+} else if (forceStart) {
+  if (!existsSync(distLanIp)) fail("compiled CLI missing (dist/). Run npm run build.");
+  if (!isBuilt) fail("Next build missing (.next/BUILD_ID). Run npm run build.");
+  useTs = false;
+} else if (existsSync(distLanIp)) {
+  useTs = false;
+} else if (existsSync(srcLanIp)) {
+  useTs = true;
+} else {
+  fail("compiled CLI missing (dist/). Run npm run build.");
+}
+
+let listenWithNext;
+let getLanIp;
+let closeHttpServer;
+if (useTs) {
+  const { register } = await import("tsx/esm/api");
+  register();
+  ({ listenWithNext } = await import("../lib/listen-with-next.ts"));
+  ({ getLanIp } = await import("../lib/lan-ip.ts"));
+  ({ closeHttpServer } = await import("../lib/stop-http.ts"));
+} else {
+  ({ listenWithNext } = await import("../dist/listen-with-next.js"));
+  ({ getLanIp } = await import("../dist/lan-ip.js"));
+  ({ closeHttpServer } = await import("../dist/stop-http.js"));
+}
+
 const login = resolveLogin(configPath);
 const loopbackOnly = bind === "127.0.0.1" || bind === "localhost";
 
@@ -123,7 +164,7 @@ if (!login) {
   });
 } else {
   try {
-    server = await listenWithNext(port, bind);
+    server = await listenWithNext(port, bind, { forceDev, forceStart });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`  Error: ${message}`);

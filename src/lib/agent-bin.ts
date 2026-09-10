@@ -148,6 +148,7 @@ export function resolveAgentBin(
   const searchDirs = [...pathDirs(env, p.delimiter)];
   const localApp = env.LOCALAPPDATA || (win ? p.join(homedir(), "AppData", "Local") : "");
   if (localApp) searchDirs.push(p.join(localApp, "cursor-agent"));
+  if (!win) searchDirs.push(p.join(homedir(), ".local", "bin"));
 
   for (const dir of searchDirs) {
     const fromDir = resolveFromInstallDir(dir, env, fs, win, p);

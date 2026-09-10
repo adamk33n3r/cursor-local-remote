@@ -1,4 +1,4 @@
-import { PICK_COOKIE, parseCookies } from "./login";
+import { PICK_COOKIE, parseCookies } from "./login.js";
 
 export type HostProxyTarget = {
   hostId: string;

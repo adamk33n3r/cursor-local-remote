@@ -163,7 +163,7 @@ test("omit Relay address: Host binds for direct LAN with Token and does not regi
   const relayPort = await freePort();
   const hostPort = await freePort();
   const relay = collectProc(
-    spawn(process.execPath, [relayCli, "--port", String(relayPort), "--host", "127.0.0.1"], {
+    spawn(process.execPath, [relayCli, "--dev", "--port", String(relayPort), "--host", "127.0.0.1"], {
       cwd: root,
       env: cleanEnv({ LOGIN_USERNAME: "relay-user", LOGIN_PASSWORD: "correct-horse" }),
       stdio: ["ignore", "pipe", "pipe"],
@@ -175,7 +175,7 @@ test("omit Relay address: Host binds for direct LAN with Token and does not regi
   const host = collectProc(
     spawn(
       process.execPath,
-      [hostCli, "--port", String(hostPort), "--host", "127.0.0.1", "--no-open", "--no-qr", "--token", "lan-token"],
+      [hostCli, "--dev", "--port", String(hostPort), "--host", "127.0.0.1", "--no-open", "--no-qr", "--token", "lan-token"],
       {
         cwd: root,
         env: cleanEnv({ CURSOR_REMOTE_STATE_DIR: stateDir }),
@@ -211,7 +211,7 @@ test("configure Relay: Host still requires Token on LAN and registers with hostn
   const relayPort = await freePort();
   const hostPort = await freePort();
   const relay = collectProc(
-    spawn(process.execPath, [relayCli, "--port", String(relayPort), "--host", "127.0.0.1"], {
+    spawn(process.execPath, [relayCli, "--dev", "--port", String(relayPort), "--host", "127.0.0.1"], {
       cwd: root,
       env: cleanEnv({ LOGIN_USERNAME: "relay-user", LOGIN_PASSWORD: "correct-horse" }),
       stdio: ["ignore", "pipe", "pipe"],
@@ -225,6 +225,7 @@ test("configure Relay: Host still requires Token on LAN and registers with hostn
       process.execPath,
       [
         hostCli,
+        "--dev",
         "--port",
         String(hostPort),
         "--host",
@@ -272,7 +273,7 @@ test("second Host start on the same PC refuses and prints the existing local URL
   const first = collectProc(
     spawn(
       process.execPath,
-      [hostCli, "--port", String(hostPort), "--host", "127.0.0.1", "--no-open", "--no-qr", "--token", "lan-token"],
+      [hostCli, "--dev", "--port", String(hostPort), "--host", "127.0.0.1", "--no-open", "--no-qr", "--token", "lan-token"],
       {
         cwd: root,
         env: cleanEnv({ CURSOR_REMOTE_STATE_DIR: stateDir }),
@@ -285,7 +286,7 @@ test("second Host start on the same PC refuses and prints the existing local URL
 
   const secondPort = await freePort();
   const second = collectProc(
-    spawn(process.execPath, [hostCli, "--port", String(secondPort), "--host", "127.0.0.1", "--no-open", "--no-qr"], {
+    spawn(process.execPath, [hostCli, "--dev", "--port", String(secondPort), "--host", "127.0.0.1", "--no-open", "--no-qr"], {
       cwd: root,
       env: cleanEnv({ CURSOR_REMOTE_STATE_DIR: stateDir }),
       stdio: ["ignore", "pipe", "pipe"],

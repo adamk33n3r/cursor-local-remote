@@ -5,12 +5,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "node:url";
 import next from "next";
-import { isAuthedCookie, LOGIN_COOKIE, clearPickCookieHeader, loginFromEnv, parseCookies, PICK_COOKIE } from "./login";
-import { forgetHost, forgetHttp, listHosts } from "./hosts";
-import { originFromRequestHeaders, urlOnRequestOrigin } from "./request-origin";
-import { attachTunnel, proxyHostHttp } from "./tunnel";
-import { hostPickNextPath } from "./host-pick";
-import type { UpgradeHandler } from "./tunnel";
+import { isAuthedCookie, LOGIN_COOKIE, clearPickCookieHeader, loginFromEnv, parseCookies, PICK_COOKIE } from "./login.js";
+import { forgetHost, forgetHttp, listHosts } from "./hosts.js";
+import { originFromRequestHeaders, urlOnRequestOrigin } from "./request-origin.js";
+import { attachTunnel, proxyHostHttp } from "./tunnel.js";
+import { hostPickNextPath } from "./host-pick.js";
+import type { UpgradeHandler } from "./tunnel.js";
 
 const relayRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -138,7 +138,7 @@ async function gate(req: IncomingMessage, res: ServerResponse): Promise<boolean>
     return true;
   }
   if (authed && method === "GET" && pathname === "/api/hosts") {
-    // Same process as Registration. Next's /api/hosts route cannot see that Map.
+    // Host list lives in this process's Registration Map, not in Next.
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ hosts: listHosts() }));
     return true;
@@ -166,13 +166,29 @@ async function gate(req: IncomingMessage, res: ServerResponse): Promise<boolean>
   return false;
 }
 
-export async function listenWithNext(port: number, bind: string): Promise<Server> {
+export type ListenWithNextOpts = {
+  forceDev?: boolean;
+  forceStart?: boolean;
+};
+
+export async function listenWithNext(
+  port: number,
+  bind: string,
+  opts: ListenWithNextOpts = {},
+): Promise<Server> {
+  if (opts.forceDev && opts.forceStart) {
+    throw new Error("--dev and --start cannot be used together");
+  }
   const isBuilt = existsSync(join(relayRoot, ".next", "BUILD_ID"));
-  if (isBuilt && !process.env.NODE_ENV) {
+  if (opts.forceStart && !isBuilt) {
+    throw new Error("Next build missing (.next/BUILD_ID). Run npm run build.");
+  }
+  const nextDev = opts.forceDev === true || (!opts.forceStart && !isBuilt);
+  if (!nextDev && !process.env.NODE_ENV) {
     Reflect.set(process.env, "NODE_ENV", "production");
   }
   const app = next({
-    dev: !isBuilt,
+    dev: nextDev,
     hostname: bind,
     port,
     dir: relayRoot,

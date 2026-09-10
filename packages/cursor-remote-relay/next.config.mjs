@@ -1,3 +1,6 @@
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
 const isDev = process.env.NODE_ENV === "development";
 
 const csp = isDev
@@ -5,6 +8,18 @@ const csp = isDev
   : "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'";
 
 const nextConfig = {
+  outputFileTracingRoot: dirname(fileURLToPath(import.meta.url)),
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  // CLI emit uses TypeScript's .js specifiers; map those back to .ts for webpack.
+  webpack(config) {
+    config.resolve.extensionAlias = {
+      ...config.resolve.extensionAlias,
+      ".js": [".ts", ".tsx", ".js"],
+    };
+    return config;
+  },
   async headers() {
     return [
       {

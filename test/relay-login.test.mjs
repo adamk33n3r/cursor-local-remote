@@ -45,7 +45,7 @@ function relayEnv(overrides = {}) {
  * @param {NodeJS.ProcessEnv} env
  */
 function startRelay(args, env) {
-  const child = spawn(process.execPath, [relayCli, ...args], {
+  const child = spawn(process.execPath, [relayCli, "--dev", ...args], {
     cwd: root,
     env,
     stdio: ["ignore", "pipe", "pipe"],

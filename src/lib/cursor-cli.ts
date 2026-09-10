@@ -9,12 +9,27 @@ let resolved: ResolvedAgent | null = null;
 function agentLaunch(): ResolvedAgent {
   if (resolved) return resolved;
   const candidate = resolveAgentBin();
-  execFileSync(candidate.command, [...candidate.prefixArgs, "--version"], {
-    stdio: "ignore",
-    timeout: 8_000,
-    windowsHide: true,
-    env: { ...process.env, ...candidate.extraEnv },
-  });
+  try {
+    execFileSync(candidate.command, [...candidate.prefixArgs, "--version"], {
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: 8_000,
+      windowsHide: true,
+      env: { ...process.env, ...candidate.extraEnv },
+    });
+  } catch (err) {
+    const stderr =
+      err && typeof err === "object" && "stderr" in err
+        ? String((err as { stderr?: Buffer | string }).stderr ?? "").trim()
+        : "";
+    const code =
+      err && typeof err === "object" && "status" in err
+        ? String((err as { status?: number | null }).status)
+        : "";
+    throw new Error(
+      `Cursor Agent CLI failed (${candidate.command} --version)${code ? ` status=${code}` : ""}${stderr ? `: ${stderr}` : ""}`,
+      { cause: err },
+    );
+  }
   resolved = candidate;
   return candidate;
 }

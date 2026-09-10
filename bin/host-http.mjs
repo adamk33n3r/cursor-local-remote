@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createServer } from "http";
+import { existsSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { parse } from "url";
@@ -16,6 +17,21 @@ const port = parseInt(process.env.PORT || "3100", 10);
 
 if (isStart && !process.env.NODE_ENV) {
   process.env.NODE_ENV = "production";
+}
+
+// Live WebSockets and SIGTERM cleanup belong on this custom server, not Next
+// instrumentation (that hook is for telemetry). Load before prepare() so Next
+// boot cannot skip them.
+if (dev) {
+  const { register } = await import("tsx/esm/api");
+  register();
+  await import("../src/lib/register-host-runtime.ts");
+} else {
+  const bundled = resolve(projectRoot, "dist/register-host-runtime.js");
+  if (!existsSync(bundled)) {
+    throw new Error("compiled Host runtime missing (dist/register-host-runtime.js). Run npm run build.");
+  }
+  await import("../dist/register-host-runtime.js");
 }
 
 const app = next({ dev, hostname, port, dir: projectRoot });
@@ -35,7 +51,7 @@ const nextUpgrade = app.upgradeHandler;
 const attach = globalThis.__attachLiveWebSockets;
 const handleLiveHttp = globalThis.__handleLiveHttpRequest;
 if (typeof attach !== "function" || typeof handleLiveHttp !== "function") {
-  throw new Error("Host live streams failed to register during Next prepare");
+  throw new Error("Host live streams failed to register");
 }
 
 const server = createServer((req, res) => {

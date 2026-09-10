@@ -19,33 +19,34 @@
   },
   "files": [
     "bin/",
-    "lib/",
-    "src/",
+    "dist/",
     "next.config.mjs",
-    "postcss.config.mjs",
-    "tsconfig.json",
     ".next/server/",
     ".next/static/",
     ".next/*.json",
     ".next/BUILD_ID",
-    ".next/package.json",
-    "Dockerfile"
+    ".next/package.json"
   ],
   "scripts": {
-    "build": "next build",
-    "prepublishOnly": "next build",
+    "dev": "node bin/cursor-remote-relay.mjs --dev",
+    "build": "tsc -p tsconfig.cli.json && next build",
+    "start": "node bin/cursor-remote-relay.mjs --start",
+    "prepublishOnly": "npm run build && node ../../scripts/strip-next-maps.mjs",
     "test": "node --test \"../../test/relay-*.test.mjs\" && node --import tsx --test --test-concurrency=1 --test-reporter=spec \"../../test/relay-*.test.ts\" \"../../test/source-ip.test.ts\" \"../../test/request-origin.test.ts\" \"../../test/host-pick.test.ts\" \"../../test/registration-tunnel.test.ts\" \"../../test/tunnel-ws-close.test.ts\" \"../../test/host-list-*.test.ts\" \"../../test/host-forget.test.ts\" \"../../test/reconnect-live-ws.test.ts\""
   },
   "dependencies": {
     "next": "^15.5.12",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "tsx": "^4.23.13",
     "ws": "^8.21.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.1",
-    "tailwindcss": "^4.2.1"
+    "@types/node": "^25.5.0",
+    "@types/ws": "^8.18.1",
+    "tailwindcss": "^4.2.1",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
   },
   "publishConfig": {
     "access": "public"

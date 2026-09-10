@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noEmit": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "rootDir": "lib",
+    "outDir": "dist",
+    "declaration": false,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["lib/**/*.ts"],
+  "exclude": ["lib/reconnect-live-ws.ts"]
+}

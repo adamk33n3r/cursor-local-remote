@@ -71,7 +71,7 @@ function startBin(cli: string, args: string[], env: NodeJS.ProcessEnv): Proc {
 }
 
 function startRelay(args: string[], env: NodeJS.ProcessEnv): Proc {
-  return startBin(relayCli, args, env);
+  return startBin(relayCli, ["--dev", ...args], env);
 }
 
 function waitForStdout(proc: Proc, pattern: RegExp, timeoutMs = 8_000): Promise<string> {
@@ -520,6 +520,7 @@ describe("Forget, persist, drop, reconnect", { concurrency: false }, () => {
     const hostProc = startBin(
       hostCli,
       [
+        "--dev",
         "--port",
         String(hostPort),
         "--host",

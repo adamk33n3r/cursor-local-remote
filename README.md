@@ -33,6 +33,27 @@ cursor-remote
 
 A QR code pops up in your terminal — scan it from your phone and you're connected.
 
+Host Docker image (`adamk33n3r/cursor-remote`): compiled Node, Linux Agent CLI baked in (`curl https://cursor.com/install`). This image cannot run a Windows `agent.cmd` bind-mount.
+
+Authenticate with `CURSOR_API_KEY` (same env the Agent CLI already reads — create a key in Cursor settings). Mount a Workspace; Agent edits files inside the container.
+
+```bash
+docker build -t adamk33n3r/cursor-remote .
+docker run --rm -p 3100:3100 \
+  -v /path/to/workspace:/workspace \
+  -e CURSOR_API_KEY=your_cursor_api_key \
+  -e AUTH_TOKEN=my-token \
+  adamk33n3r/cursor-remote
+```
+
+The image already listens on `0.0.0.0:3100`, uses `/workspace` as the Start directory, and passes `--no-open`. `AUTH_TOKEN` is enough; do not also pass `--token`. Override port with `-e PORT=…` and `-p` if needed.
+
+On Linux/macOS, `-p 3100:3100` works the same; `--network host` is optional if you want LAN Clients to use the host's IP without port publish.
+
+Optional: point at a Linux Agent already on the host instead of the in-image install (`CURSOR_AGENT=/agent/agent` and a volume that contains that binary). Do not mount a Windows Cursor Agent tree into this image.
+
+Relay does not spawn Agent; it only needs Login env.
+
 ## Updating
 
 ```bash
@@ -53,8 +74,8 @@ Listens on `0.0.0.0:3200` by default (`-p` / `PORT` to override). Stdout prints 
 Same process in a container (publish the port, pass Login via env):
 
 ```bash
-docker build -t cursor-remote-relay packages/cursor-remote-relay
-docker run --rm -p 3200:3200 -e LOGIN_USERNAME=user -e LOGIN_PASSWORD=secret cursor-remote-relay
+docker build -t adamk33n3r/cursor-remote-relay packages/cursor-remote-relay
+docker run --rm -p 3200:3200 -e LOGIN_USERNAME=user -e LOGIN_PASSWORD=secret adamk33n3r/cursor-remote-relay
 ```
 
 I'm actively using this myself on a daily basis, so bugs get noticed and fixed quickly.
@@ -182,17 +203,19 @@ All endpoints require a valid token (cookie or `Bearer` header).
 | `AUTH_TOKEN` | Fixed auth token (otherwise randomly generated each launch) |
 | `CURSOR_WORKSPACE` | Workspace path (set automatically by the CLI) |
 | `CURSOR_FORCE` | Set to `1` to pass `--force` to Agent; `0` to disable. If unset, the Host settings toggle is used |
+| `CURSOR_API_KEY` | Agent CLI auth (headless / Docker). Create a key in Cursor; do not bake it into the image |
+| `CURSOR_AGENT` | Path to an `agent` binary (or Windows `agent.cmd`) when it is not on PATH |
 | `PORT` | Server port (default: `3100`) |
 
 ## Requirements
 
 - [Node.js](https://nodejs.org/) 22+
-- [Cursor](https://cursor.com) with the CLI installed (`agent --version` should work)
+- [Cursor](https://cursor.com) with the CLI installed (`agent --version` should work), **or** Docker Host with `CURSOR_API_KEY` (Agent CLI is in that image)
 - A Cursor subscription (Pro, Team, etc.)
 
 ## Development
 
-Contributions are welcome! Mainly created this so I can use Cursor when I don't feel like being at my desk. The whole project was vibecoded with Cursor, obviously. Run `npm run dev` to start the dev server.
+From a git checkout, TypeScript is compiled on the fly (Next HMR + tsx for the CLIs). `--dev` forces that even if `.next` from a previous `next build` is still on disk.
 
 ```bash
 git clone https://github.com/adamk33n3r/cursor-local-remote.git
@@ -200,6 +223,23 @@ cd cursor-local-remote
 npm install
 npm run dev
 ```
+
+Relay Next-dev (Login env required to serve the Host list):
+
+```bash
+npm run relay:dev
+```
+
+Production-like (compiled `dist/` + `.next`, no tsx):
+
+```bash
+npm run build
+npm start
+npm run relay:build
+npm run relay:start
+```
+
+`--start` on either CLI requires those build artifacts and fails if they are missing.
 
 ## License
 

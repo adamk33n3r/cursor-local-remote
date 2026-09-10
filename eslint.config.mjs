@@ -12,6 +12,8 @@ export default tseslint.config(
       ".worktrees/",
       "**/next-env.d.ts",
       "packages/cursor-remote-relay/.next/",
+      "dist/",
+      "packages/cursor-remote-relay/dist/",
     ],
   },
   js.configs.recommended,
