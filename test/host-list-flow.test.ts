@@ -37,6 +37,7 @@ function relayEnv(overrides: Record<string, string | undefined> = {}): NodeJS.Pr
   const env = { ...process.env };
   delete env.LOGIN_USERNAME;
   delete env.LOGIN_PASSWORD;
+  delete env.LOGIN_MODE;
   delete env.PORT;
   delete env.HOST;
   delete env.CURSOR_REMOTE_RELAY_STATE_DIR;
@@ -676,5 +677,49 @@ describe("Host list then Host", { concurrency: false }, () => {
     const lanHtml = await lan.text();
     assert.doesNotMatch(lanHtml, /href="\/hosts"/);
     assert.doesNotMatch(lanHtml, /action="\/logout"/);
+  });
+
+  test("none Login: Relay-path Host chrome has Hosts and no Logout", async (t) => {
+    const stateDir = mkdtempSync(join(tmpdir(), "cr-host-list-none-"));
+    t.after(() => rmSync(stateDir, { recursive: true, force: true }));
+
+    const relayPort = await freePort();
+    const hostPort = await freePort();
+    const relay = startRelay(["--port", String(relayPort), "--host", "127.0.0.1"], relayEnv());
+    t.after(() => stopRelay(relay));
+    await waitForStdout(relay, /Press Ctrl\+C to stop/, 60_000);
+
+    const env = relayEnv({ CURSOR_REMOTE_STATE_DIR: stateDir });
+    delete env.AUTH_TOKEN;
+    const hostProc = startBin(
+      hostCli,
+      [
+        "--dev",
+        "--port",
+        String(hostPort),
+        "--host",
+        "127.0.0.1",
+        "--no-open",
+        "--no-qr",
+        "--token",
+        "lan-token",
+        "--relay",
+        `http://127.0.0.1:${relayPort}`,
+      ],
+      env,
+    );
+    t.after(() => stopRelay(hostProc));
+    await waitForStdout(hostProc, /Ready/, 60_000);
+
+    const row = await waitForHostRow(relayPort, "");
+
+    const proxied = await fetch(`http://127.0.0.1:${relayPort}/h/${row.id}/`, {
+      signal: AbortSignal.timeout(20_000),
+    });
+    assert.equal(proxied.status, 200);
+    const relayHtml = await proxied.text();
+    assert.match(relayHtml, /href="\/hosts"/);
+    assert.doesNotMatch(relayHtml, /action="\/logout"/);
+    assert.match(relayHtml, new RegExp(`data-relay-host-id="${row.id}"`));
   });
 });

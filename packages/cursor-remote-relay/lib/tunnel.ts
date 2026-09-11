@@ -5,10 +5,17 @@ import { Buffer } from "node:buffer";
 import { WebSocket, WebSocketServer } from "ws";
 import { isLanSourceIp } from "./source-ip.js";
 import { attachLiveClient, getHost, getOnlineHost, markHostOffline, putHost } from "./hosts.js";
-import { isAuthedCookie, LOGIN_COOKIE, loginFromEnv, parseCookies, pickCookieHeader } from "./login.js";
+import {
+  isAuthedCookie,
+  LOGIN_COOKIE,
+  loginFromEnv,
+  loginRequiresCookie,
+  parseCookies,
+  pickCookieHeader,
+} from "./login.js";
 import { isCookieLessHostAsset, isHostListLivePath, resolveHostProxy } from "./host-pick.js";
 import { urlOnRequestOrigin } from "./request-origin.js";
-import { RELAY_HOST_ID_HEADER } from "./via-relay.js";
+import { LOGIN_MODE_HEADER, RELAY_HOST_ID_HEADER } from "./via-relay.js";
 
 const TUNNEL_PATH = "/tunnel";
 const HOP_BY_HOP = new Set([
@@ -124,7 +131,7 @@ function pendingMaps(socket: TunnelSocket): TunnelPending {
 
 async function clientIsAuthed(req: IncomingMessage): Promise<boolean> {
   const login = loginFromEnv();
-  if (!login) return false;
+  if (!loginRequiresCookie() || !login) return true;
   const cookies = parseCookies(req.headers.cookie);
   return isAuthedCookie(cookies[LOGIN_COOKIE], login);
 }
@@ -342,7 +349,11 @@ export async function proxyHostHttp(req: IncomingMessage, res: ServerResponse): 
     id: requestId,
     method: req.method ?? "GET",
     url: target.forwardUrl,
-    headers: { ...filterHeaders(req.headers), [RELAY_HOST_ID_HEADER]: target.hostId },
+    headers: {
+      ...filterHeaders(req.headers),
+      [RELAY_HOST_ID_HEADER]: target.hostId,
+      [LOGIN_MODE_HEADER]: loginRequiresCookie() ? "password" : "none",
+    },
     body: body.length > 0 ? body.toString("base64") : "",
   });
 

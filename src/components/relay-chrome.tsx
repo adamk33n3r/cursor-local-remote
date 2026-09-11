@@ -32,7 +32,13 @@ function asHostRows(value: unknown): HostRow[] | null {
   });
 }
 
-export function RelayChrome({ hostId }: { hostId: string | null }) {
+export function RelayChrome({
+  hostId,
+  showLogout,
+}: {
+  hostId: string | null;
+  showLogout: boolean;
+}) {
   const [lost, setLost] = useState(false);
 
   useEffect(() => {
@@ -91,11 +97,13 @@ export function RelayChrome({ hostId }: { hostId: string | null }) {
         <a href="/hosts" className="rounded px-2 py-1 text-sm text-text-secondary hover:bg-bg-hover">
           Hosts
         </a>
-        <form method="post" action="/logout">
-          <button type="submit" className="text-sm text-text-muted hover:text-text">
-            Logout
-          </button>
-        </form>
+        {showLogout ? (
+          <form method="post" action="/logout">
+            <button type="submit" className="text-sm text-text-muted hover:text-text">
+              Logout
+            </button>
+          </form>
+        ) : null}
       </div>
       {lost ? (
         <div

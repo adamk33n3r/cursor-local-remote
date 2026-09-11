@@ -2,7 +2,12 @@ import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { PwaInstall } from "@/components/pwa-install";
 import { RelayChrome } from "@/components/relay-chrome";
-import { RELAY_HOST_ID_HEADER, VIA_RELAY_HEADER, VIA_RELAY_VALUE } from "@/lib/via-relay";
+import {
+  LOGIN_MODE_HEADER,
+  RELAY_HOST_ID_HEADER,
+  VIA_RELAY_HEADER,
+  VIA_RELAY_VALUE,
+} from "@/lib/via-relay";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -39,11 +44,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const hdr = await headers();
   const viaRelay = hdr.get(VIA_RELAY_HEADER) === VIA_RELAY_VALUE;
   const hostId = hdr.get(RELAY_HOST_ID_HEADER);
+  const showLogout = hdr.get(LOGIN_MODE_HEADER) !== "none";
   return (
     <html lang="en">
       <body className="overscroll-none flex h-dvh flex-col">
         <script dangerouslySetInnerHTML={{ __html: SW_CLEANUP_SCRIPT }} />
-        {viaRelay ? <RelayChrome hostId={hostId} /> : null}
+        {viaRelay ? <RelayChrome hostId={hostId} showLogout={showLogout} /> : null}
         <div className="min-h-0 flex-1">{children}</div>
         <PwaInstall />
       </body>

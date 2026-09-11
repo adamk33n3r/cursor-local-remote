@@ -69,9 +69,20 @@ npm install -g @adamk33n3r/cursor-remote-relay
 cursor-remote-relay
 ```
 
-Listens on `0.0.0.0:3200` by default (`-p` / `PORT` to override). Stdout prints localhost and LAN Host-list URLs. Set Login with `LOGIN_USERNAME` and `LOGIN_PASSWORD`, or `--config relay.json` (`{ "username", "password" }`). Until those are set, the process stays up and does not serve Login or the Host list.
+Listens on `0.0.0.0:3200` by default (`-p` / `PORT` to override). Stdout prints localhost and LAN Host-list URLs.
 
-Same process in a container (publish the port, pass Login via env):
+Login (authenticating a Client to the Host list) is one mode at a time:
+
+| What you set | Mode | Host list | Stdout |
+| --- | --- | --- | --- |
+| Both username and password, none not explicit | Password | Splash Login, cookie, Logout | Host-list URLs only |
+| Username and password unset, none not explicit | None (default) | Served with no splash and no Logout | URLs plus a warning that the Host list is not secured |
+| None explicit (`--login none`, `LOGIN_MODE=none`, or config `"login": "none"`). Credentials may still be present and are unused. | None | Same as default none | URLs. No unsecured warning |
+| Password explicit (`--login password`, `LOGIN_MODE=password`, or config `"login": "password"`), username or password unset | Misconfig | Process up. Login and Host list not served | Says the Host list will not be served until credentials are set |
+
+Set password Login with `LOGIN_USERNAME` and `LOGIN_PASSWORD`, or `--config relay.json` (`{ "username", "password" }`). None can sit behind a forward-auth reverse proxy; the Relay does not require or enforce a proxy. None without a proxy is allowed.
+
+Same process in a container (publish the port; Login env is optional):
 
 ```bash
 docker build -t adamk33n3r/cursor-remote-relay packages/cursor-remote-relay

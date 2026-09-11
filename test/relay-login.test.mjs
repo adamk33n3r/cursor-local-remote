@@ -30,6 +30,7 @@ function relayEnv(overrides = {}) {
   const env = { ...process.env };
   delete env.LOGIN_USERNAME;
   delete env.LOGIN_PASSWORD;
+  delete env.LOGIN_MODE;
   delete env.PORT;
   delete env.HOST;
   delete env.CURSOR_REMOTE_RELAY_STATE_DIR;
@@ -105,27 +106,76 @@ async function stopRelay(proc) {
   });
 }
 
-test("unset Login: process stays up; Host list and Login are not served; stdout says so", async (t) => {
+test("unset Login defaults to none: Host list without cookie, no splash, no Logout, unsecured warning", async (t) => {
   const port = await freePort();
   const proc = startRelay(["--port", String(port)], relayEnv());
+  t.after(() => stopRelay(proc));
+
+  const stdout = await waitForStdout(proc, /Press Ctrl\+C to stop/, 60_000);
+  assert.equal(proc.child.exitCode, null);
+  assert.match(stdout, new RegExp(`http://localhost:${port}\\b`));
+  assert.match(stdout, /Host list is not secured/i);
+  assert.doesNotMatch(stdout, /token/i);
+
+  const origin = await fetch(`http://127.0.0.1:${port}/`, { redirect: "follow" });
+  assert.equal(origin.status, 200);
+  const originHtml = await origin.text();
+  assert.doesNotMatch(originHtml, /<form/i);
+  assert.doesNotMatch(originHtml, /action="\/logout"/);
+  assert.match(originHtml, /Host/i);
+
+  const hosts = await fetch(`http://127.0.0.1:${port}/hosts`);
+  assert.equal(hosts.status, 200);
+  const hostsHtml = await hosts.text();
+  assert.doesNotMatch(hostsHtml, /<form/i);
+  assert.doesNotMatch(hostsHtml, /action="\/logout"/);
+
+  const hostsJson = await fetch(`http://127.0.0.1:${port}/api/hosts`);
+  assert.equal(hostsJson.status, 200);
+  assert.deepEqual(await hostsJson.json(), { hosts: [] });
+});
+
+test("explicit none serves Host list without the unsecured warning, even with leftover credentials", async (t) => {
+  const port = await freePort();
+  const password = "leftover-pass-do-not-print";
+  const proc = startRelay(
+    ["--port", String(port), "--login", "none"],
+    relayEnv({ LOGIN_USERNAME: "leftover-user", LOGIN_PASSWORD: password }),
+  );
+  t.after(() => stopRelay(proc));
+
+  const stdout = await waitForStdout(proc, /Press Ctrl\+C to stop/, 60_000);
+  assert.match(stdout, new RegExp(`http://localhost:${port}\\b`));
+  assert.doesNotMatch(stdout, /Host list is not secured/i);
+  assert.doesNotMatch(stdout, new RegExp(password));
+  assert.doesNotMatch(stdout, /token/i);
+
+  const hostsJson = await fetch(`http://127.0.0.1:${port}/api/hosts`);
+  assert.equal(hostsJson.status, 200);
+  assert.deepEqual(await hostsJson.json(), { hosts: [] });
+
+  const hosts = await fetch(`http://127.0.0.1:${port}/hosts`);
+  assert.equal(hosts.status, 200);
+  assert.doesNotMatch(await hosts.text(), /action="\/logout"/);
+});
+
+test("explicit password with credentials unset: process stays up; Host list is not served", async (t) => {
+  const port = await freePort();
+  const proc = startRelay(["--port", String(port), "--login", "password"], relayEnv());
   t.after(() => stopRelay(proc));
 
   const stdout = await waitForStdout(proc, /Host list will not be served/i);
   assert.equal(proc.child.exitCode, null);
   assert.match(stdout, /until .+ (are )?set/i);
+  assert.doesNotMatch(stdout, /Host list is not secured/i);
 
   const listRes = await fetch(`http://127.0.0.1:${port}/`);
   assert.notEqual(listRes.status, 200);
   const listBody = await listRes.text();
   assert.doesNotMatch(listBody, /<form/i);
 
-  const loginRes = await fetch(`http://127.0.0.1:${port}/login`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: "username=anyone&password=secret",
-  });
-  assert.notEqual(loginRes.status, 200);
-  assert.equal(loginRes.headers.getSetCookie().length, 0);
+  const hostsJson = await fetch(`http://127.0.0.1:${port}/api/hosts`);
+  assert.notEqual(hostsJson.status, 200);
 });
 
 test("stdout prints localhost and LAN Host-list URLs only, with no Token or Login password", async (t) => {
@@ -255,6 +305,42 @@ test("Login username and password can come from a config file", async (t) => {
     cookies.some((c) => c.startsWith("cr_login=")),
     `expected cr_login Set-Cookie, got ${JSON.stringify(cookies)}`,
   );
+});
+
+test("config login none serves Host list without the unsecured warning", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "relay-config-none-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const configPath = join(dir, "relay.json");
+  writeFileSync(
+    configPath,
+    JSON.stringify({ login: "none", username: "leftover-user", password: "leftover-pass-do-not-print" }),
+  );
+
+  const port = await freePort();
+  const proc = startRelay(["--port", String(port), "--config", configPath], relayEnv());
+  t.after(() => stopRelay(proc));
+  const stdout = await waitForStdout(proc, /Press Ctrl\+C to stop/, 60_000);
+  assert.doesNotMatch(stdout, /Host list is not secured/i);
+  assert.doesNotMatch(stdout, /leftover-pass-do-not-print/);
+
+  const hostsJson = await fetch(`http://127.0.0.1:${port}/api/hosts`);
+  assert.equal(hostsJson.status, 200);
+  assert.deepEqual(await hostsJson.json(), { hosts: [] });
+});
+
+test("config login password with credentials unset does not serve the Host list", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "relay-config-password-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const configPath = join(dir, "relay.json");
+  writeFileSync(configPath, JSON.stringify({ login: "password" }));
+
+  const port = await freePort();
+  const proc = startRelay(["--port", String(port), "--config", configPath], relayEnv());
+  t.after(() => stopRelay(proc));
+  const stdout = await waitForStdout(proc, /Host list will not be served/i);
+  assert.doesNotMatch(stdout, /Host list is not secured/i);
+  const listRes = await fetch(`http://127.0.0.1:${port}/`);
+  assert.notEqual(listRes.status, 200);
 });
 
 test("starting Relay never starts a Host", async (t) => {

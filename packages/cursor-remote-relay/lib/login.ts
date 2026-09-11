@@ -11,6 +11,12 @@ export function loginFromEnv(): LoginCredentials | null {
   return { username, password };
 }
 
+/** Password Login is on only when selected. LOGIN_MODE=none ignores leftover credentials. */
+export function loginRequiresCookie(): boolean {
+  if ((process.env.LOGIN_MODE ?? "") === "none") return false;
+  return loginFromEnv() !== null;
+}
+
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }

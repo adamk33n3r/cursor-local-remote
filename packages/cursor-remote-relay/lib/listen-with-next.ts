@@ -5,7 +5,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "node:url";
 import next from "next";
-import { isAuthedCookie, LOGIN_COOKIE, clearPickCookieHeader, loginFromEnv, parseCookies, PICK_COOKIE } from "./login.js";
+import {
+  isAuthedCookie,
+  LOGIN_COOKIE,
+  clearPickCookieHeader,
+  loginFromEnv,
+  loginRequiresCookie,
+  parseCookies,
+  PICK_COOKIE,
+} from "./login.js";
 import { forgetHost, forgetHttp, listHosts } from "./hosts.js";
 import { originFromRequestHeaders, urlOnRequestOrigin } from "./request-origin.js";
 import { attachTunnel, proxyHostHttp } from "./tunnel.js";
@@ -83,12 +91,6 @@ function attachRequestOriginRedirects(req: IncomingMessage, res: ServerResponse)
  */
 async function gate(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const login = loginFromEnv();
-  if (!login) {
-    res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Host list is not served until Login credentials are set.\n");
-    return true;
-  }
-
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   const pathname = url.pathname;
   const cookies = parseCookies(req.headers.cookie);
@@ -99,7 +101,10 @@ async function gate(req: IncomingMessage, res: ServerResponse): Promise<boolean>
     return false;
   }
 
-  const authed = await isAuthedCookie(cookies[LOGIN_COOKIE], login);
+  const authed =
+    loginRequiresCookie() && login
+      ? await isAuthedCookie(cookies[LOGIN_COOKIE], login)
+      : true;
   const method = req.method ?? "GET";
 
   if (method === "POST" && (pathname === "/login" || pathname === "/logout")) {

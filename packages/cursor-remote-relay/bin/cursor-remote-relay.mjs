@@ -26,6 +26,7 @@ function parseArgs(argv) {
   let configPath = null;
   let forceDev = false;
   let forceStart = false;
+  let loginChoice = null;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--port" || a === "-p") {
@@ -34,6 +35,8 @@ function parseArgs(argv) {
       bind = argv[++i] || bind;
     } else if (a === "--config") {
       configPath = argv[++i] || configPath;
+    } else if (a === "--login") {
+      loginChoice = argv[++i] || loginChoice;
     } else if (a === "--dev") {
       forceDev = true;
     } else if (a === "--start") {
@@ -53,7 +56,10 @@ function parseArgs(argv) {
     process.exit(1);
   }
   if (forceDev && forceStart) fail("--dev and --start cannot be used together");
-  return { port, bind, configPath, forceDev, forceStart };
+  if (loginChoice !== null && loginChoice !== "none" && loginChoice !== "password") {
+    fail(`invalid --login: ${loginChoice} (use none or password)`);
+  }
+  return { port, bind, configPath, forceDev, forceStart, loginChoice };
 }
 
 function printHelp() {
@@ -66,21 +72,37 @@ function printHelp() {
   Options:
     -p, --port     Port to listen on (default: 3200)
     --host         Bind address (default: 0.0.0.0)
-    --config       JSON file with Login username and password
+    --config       JSON file with Login username, password, and optional login
+    --login        none or password (overrides LOGIN_MODE and config login)
     --dev          Force Next development (HMR), even if a build exists
     --start        Require a production build (dist/ + .next)
     -V, --version  Show version number
     -h, --help     Show this help
 
-  Login (required to serve the Host list):
-    LOGIN_USERNAME / LOGIN_PASSWORD environment variables, or a --config file:
+  Login:
+    password — splash Login when both username and password are set
+               (LOGIN_USERNAME / LOGIN_PASSWORD, or --config).
+    none     — Host list without that Login. Default when credentials are unset.
+               Explicit none (--login none, LOGIN_MODE=none, or config
+               "login": "none") skips the unsecured warning. Leftover
+               credentials are unused. A forward-auth reverse proxy in front
+               is optional, not required.
+
+    Explicit password with username or password unset does not serve the
+    Host list.
 
       { "username": "user", "password": "secret" }
+      { "login": "none" }
 `);
 }
 
-function loginFromConfig(configPath) {
-  if (!configPath) return null;
+function parseLoginChoice(value) {
+  if (value === "none" || value === "password") return value;
+  return null;
+}
+
+function readConfig(configPath) {
+  if (!configPath) return { credentials: null, login: null };
   let raw;
   try {
     raw = JSON.parse(readFileSync(configPath, "utf8"));
@@ -91,8 +113,8 @@ function loginFromConfig(configPath) {
   }
   const username = typeof raw.username === "string" ? raw.username : "";
   const password = typeof raw.password === "string" ? raw.password : "";
-  if (!username || !password) return null;
-  return { username, password };
+  const credentials = username && password ? { username, password } : null;
+  return { credentials, login: parseLoginChoice(raw.login) };
 }
 
 function resolveLogin(configPath) {
@@ -100,8 +122,10 @@ function resolveLogin(configPath) {
     username: process.env.LOGIN_USERNAME ?? "",
     password: process.env.LOGIN_PASSWORD ?? "",
   };
-  if (fromEnv.username && fromEnv.password) return fromEnv;
-  return loginFromConfig(configPath);
+  const fromFile = readConfig(configPath);
+  const credentials =
+    fromEnv.username && fromEnv.password ? fromEnv : fromFile.credentials;
+  return { credentials, configLogin: fromFile.login };
 }
 
 function listenPlain(port, bind, handler) {
@@ -115,7 +139,9 @@ function listenPlain(port, bind, handler) {
   });
 }
 
-const { port, bind, configPath, forceDev, forceStart } = parseArgs(process.argv.slice(2));
+const { port, bind, configPath, forceDev, forceStart, loginChoice } = parseArgs(
+  process.argv.slice(2),
+);
 const isBuilt = existsSync(buildIdPath);
 let useTs = false;
 if (forceDev) {
@@ -148,16 +174,33 @@ if (useTs) {
   ({ closeHttpServer } = await import("../dist/stop-http.js"));
 }
 
-const login = resolveLogin(configPath);
+const { credentials: login, configLogin } = resolveLogin(configPath);
 const loopbackOnly = bind === "127.0.0.1" || bind === "localhost";
+const envMode = parseLoginChoice(process.env.LOGIN_MODE);
+const explicit = loginChoice ?? envMode ?? configLogin;
+const refuseHostList = explicit === "password" && !login;
+const warnUnsecured = !login && explicit !== "none" && explicit !== "password";
 
-if (login) {
+if (explicit === "none") {
+  process.env.LOGIN_MODE = "none";
+  delete process.env.LOGIN_USERNAME;
+  delete process.env.LOGIN_PASSWORD;
+} else if (login) {
+  process.env.LOGIN_MODE = "password";
   process.env.LOGIN_USERNAME = login.username;
   process.env.LOGIN_PASSWORD = login.password;
+} else if (refuseHostList) {
+  process.env.LOGIN_MODE = "password";
+  delete process.env.LOGIN_USERNAME;
+  delete process.env.LOGIN_PASSWORD;
+} else {
+  process.env.LOGIN_MODE = "none";
+  delete process.env.LOGIN_USERNAME;
+  delete process.env.LOGIN_PASSWORD;
 }
 
 let server;
-if (!login) {
+if (refuseHostList) {
   server = await listenPlain(port, bind, (_req, res) => {
     res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Host list is not served until Login credentials are set.\n");
@@ -183,8 +226,11 @@ if (networkUrl) {
   console.log(`  Network:  ${networkUrl}`);
 }
 console.log("");
-if (!login) {
+if (refuseHostList) {
   console.log("  Host list will not be served until Login credentials are set.");
+  console.log("");
+} else if (warnUnsecured) {
+  console.log("  WARNING: Host list is not secured. Anyone who can reach this origin can see it.");
   console.log("");
 }
 console.log("  Press Ctrl+C to stop");

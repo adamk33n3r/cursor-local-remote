@@ -100,6 +100,7 @@ function cleanEnv(overrides: Record<string, string | undefined> = {}): NodeJS.Pr
   const env = { ...process.env };
   delete env.LOGIN_USERNAME;
   delete env.LOGIN_PASSWORD;
+  delete env.LOGIN_MODE;
   delete env.PORT;
   delete env.HOST;
   delete env.AUTH_TOKEN;
