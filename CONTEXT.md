@@ -53,8 +53,8 @@ A Client-started Session appearing as that same Session in the Agent Window conv
 _Avoid_: sync, resume (as the product name), a copy of the conversation
 
 **Login**:
-The user's username and password on the Host list.
-_Avoid_: pairing, token (for this act)
+Authenticating a Client to the Host list before that Client sees Hosts. One of: username and password, OIDC at an identity provider, or none (the list is served without that act). Both username and password set is the password mode. None is the default when they are unset, or an explicit setting.
+_Avoid_: pairing, token (for this act), Host-list auth (as a second type)
 
 **Registration**:
 A Host connecting to the Relay.
