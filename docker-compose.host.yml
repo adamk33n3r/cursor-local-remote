@@ -1,0 +1,41 @@
+# Host: Agent in Linux, Start directory /workspace.
+#   docker compose -f docker-compose.host.yml up --build
+#
+# RELAY_URL is optional (LAN Clients still use port 3100). Same machine:
+#   RELAY_URL=http://host.docker.internal:3200
+# Linux needs extra_hosts below (Docker Desktop already defines it). Shared
+# Compose network: RELAY_URL=http://relay:3200 and uncomment networks at bottom.
+#
+# /root/.cursor is a named volume by default so Sessions survive restarts.
+# Desk cache keys are the host absolute path and will not match /workspace.
+# Do not bind a Windows Cursor Agent tree.
+
+services:
+  host:
+    build: .
+    image: adamk33n3r/cursor-remote
+    hostname: ${HOST_NAME:-cursor-remote}
+    ports:
+      - "${HOST_PORT:-3100}:3100"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      CURSOR_API_KEY: ${CURSOR_API_KEY:?set CURSOR_API_KEY in the environment or a .env file}
+      AUTH_TOKEN: ${AUTH_TOKEN:-}
+      RELAY_URL: ${RELAY_URL:-}
+      CURSOR_FORCE: ${CURSOR_FORCE:-}
+    volumes:
+      - ${WORKSPACE_PATH:-.}:/workspace
+      - ${CURSOR_DIR:-cursor-agent-cache}:/root/.cursor
+      - host-identity:/root/.cursor-remote
+    restart: unless-stopped
+
+volumes:
+  cursor-agent-cache:
+  host-identity:
+
+# Shared network with docker-compose.relay.yml (RELAY_URL=http://relay:3200):
+# networks:
+#   default:
+#     name: cursor-remote
+#     external: true

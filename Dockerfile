@@ -30,4 +30,4 @@ WORKDIR /workspace
 # Bind 0.0.0.0:3100 and AUTH_TOKEN are already CLI defaults. Do not open a
 # browser inside the container; QR still prints if a LAN IP is detected.
 ENTRYPOINT ["node", "/app/bin/cursor-remote.mjs"]
-CMD ["--no-open"]
+CMD ["--start", "--no-open"]

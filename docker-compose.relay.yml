@@ -1,0 +1,32 @@
+# Relay: Login + Host list. Does not spawn Agent.
+#
+# Private GHCR image. Once:
+#   gh auth token | docker login ghcr.io -u adamk33n3r --password-stdin
+#   docker compose -f docker-compose.relay.yml up
+# Local rebuild: uncomment `build:` and use `up --build`.
+#
+# Clients: http://<this-machine>:3200. Hosts set RELAY_URL to that origin
+# (host.docker.internal:3200 from a Host container; relay:3200 on a shared network).
+# LOGIN_USERNAME and LOGIN_PASSWORD are required to serve Login.
+
+services:
+  relay:
+    # build: ./packages/cursor-remote-relay
+    image: ghcr.io/adamk33n3r/cursor-remote-relay:latest
+    ports:
+      - "${RELAY_PORT:-3200}:3200"
+    environment:
+      LOGIN_USERNAME: ${LOGIN_USERNAME:?set LOGIN_USERNAME}
+      LOGIN_PASSWORD: ${LOGIN_PASSWORD:?set LOGIN_PASSWORD}
+    volumes:
+      # Image runs as root; default state dir is ~/.cursor-remote-relay.
+      - relay-state:/root/.cursor-remote-relay
+    restart: unless-stopped
+
+volumes:
+  relay-state:
+
+# Optional named network Hosts on this engine can join (see docker-compose.host.yml).
+# networks:
+#   default:
+#     name: cursor-remote
