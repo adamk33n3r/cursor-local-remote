@@ -7,11 +7,7 @@
 #
 # Clients: http://<this-machine>:3200. Hosts set RELAY_URL to that origin
 # (host.docker.internal:3200 from a Host container; relay:3200 on a shared network).
-# Login is optional. Unset username/password is none (Host list served, stdout
-# warns it is not secured). Both set is password. LOGIN_MODE=none or password
-# is explicit (none skips the warning; password with credentials unset is
-# misconfig and does not serve the list). A forward-auth proxy in front of
-# none is optional, not required.
+# A forward-auth reverse proxy in front of none is optional, not required.
 
 services:
   relay:
@@ -20,9 +16,17 @@ services:
     ports:
       - "${RELAY_PORT:-3200}:3200"
     environment:
+      # none | password. This file defaults to none (Host list, no splash, no Logout,
+      # leftover credentials unused, no unsecured stdout warning).
+      # password: splash Login, cookie, Logout when both username and password are set.
+      # password with either credential unset is misconfig: process up, list not served.
+      LOGIN_MODE: ${LOGIN_MODE:-none}
+      # Password Login username. Required with LOGIN_PASSWORD for password mode.
+      # Unused when LOGIN_MODE=none.
       LOGIN_USERNAME: ${LOGIN_USERNAME:-}
+      # Password Login password. Required with LOGIN_USERNAME for password mode.
+      # Unused when LOGIN_MODE=none. Never printed on stdout.
       LOGIN_PASSWORD: ${LOGIN_PASSWORD:-}
-      LOGIN_MODE: ${LOGIN_MODE:-}
     volumes:
       # Image runs as root; default state dir is ~/.cursor-remote-relay.
       - relay-state:/root/.cursor-remote-relay
