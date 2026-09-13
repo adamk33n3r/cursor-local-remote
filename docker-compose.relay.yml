@@ -7,7 +7,11 @@
 #
 # Clients: http://<this-machine>:3200. Hosts set RELAY_URL to that origin
 # (host.docker.internal:3200 from a Host container; relay:3200 on a shared network).
-# LOGIN_USERNAME and LOGIN_PASSWORD are required to serve Login.
+# Login is optional. Unset username/password is none (Host list served, stdout
+# warns it is not secured). Both set is password. LOGIN_MODE=none or password
+# is explicit (none skips the warning; password with credentials unset is
+# misconfig and does not serve the list). A forward-auth proxy in front of
+# none is optional, not required.
 
 services:
   relay:
@@ -16,8 +20,9 @@ services:
     ports:
       - "${RELAY_PORT:-3200}:3200"
     environment:
-      LOGIN_USERNAME: ${LOGIN_USERNAME:?set LOGIN_USERNAME}
-      LOGIN_PASSWORD: ${LOGIN_PASSWORD:?set LOGIN_PASSWORD}
+      LOGIN_USERNAME: ${LOGIN_USERNAME:-}
+      LOGIN_PASSWORD: ${LOGIN_PASSWORD:-}
+      LOGIN_MODE: ${LOGIN_MODE:-}
     volumes:
       # Image runs as root; default state dir is ~/.cursor-remote-relay.
       - relay-state:/root/.cursor-remote-relay
